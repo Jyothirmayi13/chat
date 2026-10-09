@@ -1,0 +1,8 @@
+qdrant-client
+lyzr
+streamlit
+python-dotenv
+groq
+fastapi
+uvicorn
+youtube-transcript-api

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Learning Copilot</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+
+<body>
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header class="header">
+    <h1>🧠 AI Copilot</h1>
+    <span class="badge">v1.0</span>
+  </header>
+
+  <!-- ── Video Context Banner ────────────────────────────────── -->
+  <div id="context-banner" class="context-banner hidden">
+    <span class="dot"></span>
+    <span id="video-info">Connected to YouTube</span>
+  </div>
+
+  <!-- ── Agent Logs / Observability Panel ────────────────────── -->
+  <div class="log-panel">
+    <div class="log-header">🔍 Agent Activity</div>
+    <div id="agent-logs" class="log-body">
+      <p class="log-placeholder">Waiting for your query...</p>
+    </div>
+  </div>
+
+  <!-- ── Final Answer Display ────────────────────────────────── -->
+  <div id="final-answer" class="response-area hidden">
+    <div class="response-header">💡 Explanation</div>
+    <div id="answer-content" class="response-content"></div>
+  </div>
+
+  <!-- ── Input Area with Mic ─────────────────────────────────── -->
+  <div class="input-area">
+    <textarea id="query-input" placeholder="Ask a question or request recommendations..." rows="2"></textarea>
+    <div class="input-actions">
+      <button id="mic-btn" class="mic-btn" title="Voice input">
+        <span id="mic-icon">🎙️</span>
+      </button>
+      <button id="send-btn" class="send-btn">
+        <span class="btn-text">Send</span>
+        <span class="btn-loader hidden" id="btn-loader"></span>
+      </button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+
+</html>
