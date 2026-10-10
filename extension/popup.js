@@ -1,11 +1,18 @@
 /**
- * popup.js — Chrome Extension popup logic.
- * Handles voice input (webkitSpeechRecognition), backend calls, and UI updates.
+ * popup.js — Chrome extension popup (progressive enhancement).
+ * On a YouTube watch page it captures video_id + timestamp, indexes the
+ * lecture into Qdrant memory, and runs the Lyzr multi-agent pipeline.
+ * The same backend powers the mobile/desktop PWA, so this is optional.
  */
 
-const BACKEND_URL = "http://localhost:8000";
+const DEFAULT_BACKEND = "http://localhost:8000";
+let BACKEND_URL = DEFAULT_BACKEND;
 
-// ── DOM References ──────────────────────────────────────────────
+// Allow overriding the backend URL (e.g. deployed demo) without editing code.
+chrome.storage.sync.get("backend_url", ({ backend_url }) => {
+  BACKEND_URL = backend_url || DEFAULT_BACKEND;
+});
+
 const sendBtn = document.getElementById("send-btn");
 const btnText = document.querySelector(".btn-text");
 const btnLoader = document.getElementById("btn-loader");
@@ -18,120 +25,92 @@ const answerContent = document.getElementById("answer-content");
 const contextBanner = document.getElementById("context-banner");
 const videoInfo = document.getElementById("video-info");
 
-// ═══════════════════════════════════════════════════════════════
-//  VOICE INPUT — webkitSpeechRecognition
-// ═══════════════════════════════════════════════════════════════
+// ── Voice input ──────────────────────────────────────────────────
 let recognition = null;
 let isListening = false;
 
 function initSpeechRecognition() {
   const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechAPI) {
-    micBtn.title = "Speech recognition not supported";
-    micBtn.disabled = true;
-    return;
-  }
+  if (!SpeechAPI) { micBtn.disabled = true; return; }
   recognition = new SpeechAPI();
   recognition.lang = "en-US";
   recognition.interimResults = false;
   recognition.continuous = false;
-
-  recognition.onresult = (event) => {
-    const transcript = event.results[0][0].transcript;
-    queryInput.value = transcript;
-    addLog(`🎙️ Voice captured: "${transcript}"`, "success");
+  recognition.onresult = (e) => {
+    queryInput.value = e.results[0][0].transcript;
+    addLog(`🎙️ Voice captured: "${queryInput.value}"`, "success");
   };
-
   recognition.onend = () => stopListening();
-  recognition.onerror = (e) => {
-    addLog(`🎙️ Mic error: ${e.error}`, "info");
-    stopListening();
-  };
+  recognition.onerror = () => stopListening();
 }
-
 function startListening() {
   if (!recognition) return;
   isListening = true;
   micIcon.textContent = "🔴";
-  micBtn.classList.add("listening");
   recognition.start();
-  addLog("🎙️ Listening... speak now.", "active");
+  addLog("🎙️ Listening...", "active");
 }
-
 function stopListening() {
   isListening = false;
   micIcon.textContent = "🎙️";
-  micBtn.classList.remove("listening");
 }
-
-micBtn.addEventListener("click", () => {
-  if (isListening) {
-    recognition.stop();
-  } else {
-    startListening();
-  }
-});
-
+micBtn.addEventListener("click", () => (isListening ? recognition.stop() : startListening()));
 initSpeechRecognition();
 
-// ═══════════════════════════════════════════════════════════════
-//  AGENT LOG HELPERS
-// ═══════════════════════════════════════════════════════════════
+// ── Log helpers ──────────────────────────────────────────────────
 function addLog(message, type = "info") {
-  const placeholder = agentLogs.querySelector(".log-placeholder");
-  if (placeholder) placeholder.remove();
-
+  const ph = agentLogs.querySelector(".log-placeholder");
+  if (ph) ph.remove();
   const entry = document.createElement("div");
   entry.className = `log-entry ${type}`;
-  entry.textContent = message;
+  entry.innerHTML = message.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
   agentLogs.appendChild(entry);
   agentLogs.scrollTop = agentLogs.scrollHeight;
 }
-
 function clearUI() {
   agentLogs.innerHTML = "";
   answerContent.textContent = "";
   finalAnswer.classList.add("hidden");
 }
-
-// ── UI State Helpers ────────────────────────────────────────────
 function setLoading(isLoading) {
   sendBtn.disabled = isLoading;
   btnText.textContent = isLoading ? "Running..." : "Send";
   btnLoader.classList.toggle("hidden", !isLoading);
 }
-
 function showAnswer(text) {
   answerContent.textContent = text;
   finalAnswer.classList.remove("hidden");
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  BACKEND CALL
-// ═══════════════════════════════════════════════════════════════
-async function sendToBackend(query, videoId, timestamp) {
+// ── YouTube context via content.js ───────────────────────────────
+async function getYouTubeData() {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/query`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, video_id: videoId, timestamp }),
-    });
-    if (!res.ok) {
-      throw new Error(`Server responded with status ${res.status}`);
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab.url || !tab.url.includes("youtube.com/watch")) {
+      return { video_id: null, timestamp: null, success: false };
     }
-    return await res.json();
-  } catch (err) {
-    // Distinguish network failures from HTTP errors
-    if (err instanceof TypeError && err.message.includes("fetch")) {
-      throw new Error("BACKEND_OFFLINE");
-    }
-    throw err;
+    const response = await chrome.tabs.sendMessage(tab.id, { type: "GET_YOUTUBE_DATA" });
+    return response || { video_id: null, timestamp: null, success: false };
+  } catch {
+    return { video_id: null, timestamp: null, success: false };
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  SEND HANDLER
-// ═══════════════════════════════════════════════════════════════
+async function indexLecture(videoId) {
+  addLog("📥 **Indexing lecture** into memory (Qdrant)...", "info");
+  try {
+    await fetch(`${BACKEND_URL}/api/ingest_youtube`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_id: videoId, uid: "learner" }),
+    });
+    addLog("✅ Lecture queued for ingestion.", "success");
+  } catch {
+    addLog("⚠️ Could not reach backend to index.", "error");
+  }
+}
+
+// ── Send handler ─────────────────────────────────────────────────
 sendBtn.addEventListener("click", async () => {
   const query = queryInput.value.trim();
   if (!query) return;
@@ -139,76 +118,44 @@ sendBtn.addEventListener("click", async () => {
   clearUI();
   setLoading(true);
 
-  // Step 1: Request real YouTube data from content.js
-  addLog("🔗 Checking YouTube context...", "info");
-  const ytData = await getYouTubeData();
-
-  // Use real data or fall back to dummy values
-  const videoId = ytData.video_id || "dummy_video_123";
-  const timestamp = ytData.timestamp || "00:30";
-
-  if (ytData.success) {
-    addLog(`📺 Video: ${videoId} @ ${timestamp}`, "success");
+  addLog("🔗 Detecting YouTube context...", "info");
+  const yt = await getYouTubeData();
+  if (yt.success) {
+    addLog(`📺 Video ${yt.video_id} @ ${yt.timestamp}`, "success");
+    await indexLecture(yt.video_id);
   } else {
-    addLog("📺 No YouTube video detected — using demo mode.", "info");
+    addLog("📺 No YouTube page — running open-world query.", "info");
   }
 
-  // Step 2: Call backend with clean, high-level status logs
-  addLog("🔍 Searching video context...", "active");
+  addLog("🧠 Running Lyzr agent pipeline...", "active");
   try {
-    const data = await sendToBackend(query, videoId, timestamp);
-
-    // Step 3: Show generation status (ignore raw data.logs)
-    addLog("🧠 Generating answer...", "success");
-
-    // Step 4: Display final answer
-    showAnswer(data.final_answer || "No response received.");
+    const res = await fetch(`${BACKEND_URL}/api/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query,
+        uid: "learner",
+        video_id: yt.video_id,
+        timestamp: yt.timestamp,
+      }),
+    });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const data = await res.json();
+    (data.logs || []).forEach((line) => addLog(line, "info"));
+    showAnswer(data.final_answer || "No response.");
   } catch (err) {
-    if (err.message === "BACKEND_OFFLINE") {
-      addLog("❌ Could not connect to the backend server.", "error");
-      showAnswer(
-        "⚠️ Backend is offline. Please ensure the Python server " +
-        "is running on port 8000."
-      );
-    } else {
-      addLog(`❌ Error: ${err.message}`, "error");
-      showAnswer(
-        "Something went wrong while processing your request. " +
-        "Please try again."
-      );
-    }
+    addLog("❌ Backend offline. Is the server running?", "error");
+    showAnswer("⚠️ Set the backend URL (chrome.storage.backend_url) and ensure the server is up.");
   }
 
   setLoading(false);
 });
 
-// ═══════════════════════════════════════════════════════════════
-//  YOUTUBE DATA (via content.js)
-// ═══════════════════════════════════════════════════════════════
-async function getYouTubeData() {
-  try {
-    const [tab] = await chrome.tabs.query({
-      active: true, currentWindow: true,
-    });
-    // Only message content.js if we're on a YouTube watch page
-    if (!tab.url || !tab.url.includes("youtube.com/watch")) {
-      return { video_id: null, timestamp: null, success: false };
-    }
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      type: "GET_YOUTUBE_DATA",
-    });
-    return response || { video_id: null, timestamp: null, success: false };
-  } catch {
-    // content.js not loaded or tab not accessible
-    return { video_id: null, timestamp: null, success: false };
-  }
-}
-
-// ── Auto-detect YouTube on popup open ───────────────────────────
+// ── Auto-detect on popup open ────────────────────────────────────
 (async () => {
-  const ytData = await getYouTubeData();
-  if (ytData.success) {
-    videoInfo.textContent = `YouTube: ${ytData.video_id} @ ${ytData.timestamp}`;
+  const yt = await getYouTubeData();
+  if (yt.success) {
+    videoInfo.textContent = `YouTube: ${yt.video_id} @ ${yt.timestamp}`;
     contextBanner.classList.remove("hidden");
   }
 })();

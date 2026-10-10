@@ -1,8 +1,7 @@
-qdrant-client
-lyzr
-streamlit
-python-dotenv
-groq
 fastapi
-uvicorn
+uvicorn[standard]
+qdrant-client
+fastembed
+python-dotenv
 youtube-transcript-api
+requests

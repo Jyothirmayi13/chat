@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>LearnLoop — Voice-first Learning Copilot</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">🧠</span>
+      <div>
+        <h1>LearnLoop</h1>
+        <p>Your proactive lecture copilot</p>
+      </div>
+    </div>
+    <nav class="tabs">
+      <button data-tab="coach" class="active">Live Coach</button>
+      <button data-tab="ask">Ask</button>
+      <button data-tab="vault">Vault</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- LIVE COACH: proactive cards -->
+    <section id="tab-coach" class="tab active">
+      <div class="statusbar">
+        <span id="coach-dot" class="dot"></span>
+        <span id="coach-status">Listening… unknown terms get explained before you ask.</span>
+      </div>
+
+      <div class="capture">
+        <button id="mic-btn" class="mic" title="Speak your lecture context">🎙️</button>
+        <div class="capture-text">
+          <strong id="mic-state">Tap the mic</strong>
+          <span>Feed this session from your phone/desktop mic (Omi also streams automatically).</span>
+        </div>
+      </div>
+
+      <div id="cards" class="cards">
+        <div class="empty" id="cards-empty">No cards yet — start a lecture or speak, and gaps will appear here.</div>
+      </div>
+    </section>
+
+    <!-- ASK: reactive multi-agent query -->
+    <section id="tab-ask" class="tab">
+      <div class="askbox">
+        <input id="query" type="text" placeholder="e.g. What is backpropagation?" autocomplete="off" />
+        <button id="ask-send">Ask</button>
+      </div>
+      <details class="logs">
+        <summary>🔍 Agent pipeline (observability)</summary>
+        <ol id="agent-logs"></ol>
+      </details>
+      <div id="answer" class="answer hidden"></div>
+    </section>
+
+    <!-- VAULT: learned concepts + review -->
+    <section id="tab-vault" class="tab">
+      <div class="subtabs">
+        <button data-vault="known" class="active">Known concepts</button>
+        <button data-vault="review">Due for review</button>
+      </div>
+      <div id="vault-list" class="chips"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>

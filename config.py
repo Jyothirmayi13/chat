@@ -1,33 +1,47 @@
 """
-config.py — Central configuration for the Personal Knowledge Vault.
-Loads environment variables and initializes shared clients.
+config.py — Central configuration and shared clients.
+
+Loads environment variables (never commit keys) and exposes singletons used
+across the backend: the Qdrant client, the local embedding model, and the
+Lyzr agent settings.
 """
 
 import os
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
-from groq import Groq
 
-# ── Load .env variables ─────────────────────────────────────────
 load_dotenv()
 
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-LYZR_API_KEY = os.getenv("LYzR_API_KEY")
+# ── Lyzr ────────────────────────────────────────────────────────
+LYZR_API_KEY = os.getenv("LYZR_API_KEY", "")
+LYZR_AGENT_ID = os.getenv("LYZR_AGENT_ID", "")
+LYZR_TUTOR_AGENT_ID = os.getenv("LYZR_TUTOR_AGENT_ID", "")
+LYZR_GAP_AGENT_ID = os.getenv("LYZR_GAP_AGENT_ID", "")
+LYZR_VAULT_AGENT_ID = os.getenv("LYZR_VAULT_AGENT_ID", "")
+LYZR_BASE_URL = os.getenv(
+    "LYZR_BASE_URL", "https://agent-prod.studio.lyzr.ai/v3/inference/chat/"
+)
 
-# ── Model configuration ─────────────────────────────────────────
-MODEL_NAME = "llama3-8b-8192"
+# ── Qdrant ──────────────────────────────────────────────────────
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None
 
-# ── Initialize Qdrant Client ────────────────────────────────────
-def get_qdrant_client() -> QdrantClient:
-    """Return a configured Qdrant client instance."""
-    return QdrantClient(
-        url=QDRANT_URL,
-        api_key=QDRANT_API_KEY,
-    )
+# ── Identity ────────────────────────────────────────────────────
+DEFAULT_UID = os.getenv("DEFAULT_UID", "learner")
+
+# Embedding model: BAAI/bge-small-en-v1.5 -> 384-dim vectors.
+EMBED_MODEL = "BAAI/bge-small-en-v1.5"
+VECTOR_SIZE = 384
+
+def _make_qdrant() -> QdrantClient:
+    """Use the configured server; fall back to embedded disk storage."""
+    try:
+        client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=3)
+        client.get_collections()
+        return client
+    except Exception:
+        print("[config] Qdrant server unreachable — using embedded ./qdrant_data")
+        return QdrantClient(path="./qdrant_data")
 
 
-# ── Shared singleton instances ───────────────────────────────────
-qdrant_client = get_qdrant_client()
-groq_client = Groq(api_key=GROQ_API_KEY)
+qdrant_client = _make_qdrant()
