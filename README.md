@@ -22,6 +22,25 @@ desktop (a PWA), with spaced-repetition review. Same experience on any device.
 | Personalization | Generic definition | Anchored to concepts you already know |
 | Devices | Desktop Chrome only | PWA (phone + desktop) + extension |
 | Input | Text selection | Voice (Omi) + mic + text |
+| Where you end up | New tab, place lost | Card floats on the watch page itself |
+| After the answer | Gone | Vault entry + spaced-repetition review |
+
+We are not claiming to look up a word faster than Gemini. We are claiming the
+other 90%: the terms you did not know to ask about, explained at the level of
+what you already know, and still there next week.
+
+## Privacy model
+An always-on microphone over someone's lecture is only acceptable if the
+learner holds the switch, so:
+- **Off by default.** No transcript is analysed until `POST /api/coach {on:true}`.
+  The web mic and the Omi webhooks both respect it; the Live Coach tab shows the state.
+- **The mic stops when you leave.** Hiding the PWA tab ends capture immediately.
+- **`DROP_WORDS`** discards any chunk containing a phrase you list — before it is
+  embedded, stored, or sent to Lyzr.
+- **Your own speech is not lecture content.** Omi's `is_user` segments are stored as
+  context but never fed to the gap detector, so asking a question out loud cannot
+  produce a card about your own words.
+- **Forget per concept.** The vault has a ✕ on every entry (`POST /api/forget`).
 
 ## Architecture (one execution loop)
 
