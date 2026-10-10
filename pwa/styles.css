@@ -48,6 +48,9 @@ main { padding: 16px; max-width: 720px; margin: 0 auto; }
 .capture-text strong { font-size: 14px; }
 .capture-text span { font-size: 12px; color: var(--muted); }
 
+.heard { background: var(--panel); border: 1px dashed #ffffff22; border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; font-size: 13.5px; line-height: 1.5; }
+.heard-label { color: var(--accent2); font-weight: 700; margin-right: 6px; }
+
 .cards { display: flex; flex-direction: column; gap: 12px; }
 .empty { color: var(--muted); text-align: center; padding: 30px 10px; font-size: 13px; }
 .card {

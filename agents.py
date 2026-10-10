@@ -95,12 +95,15 @@ def detect_gaps(uid: str, transcript_text: str, video_id: str | None = None) -> 
         f"LECTURE TRANSCRIPT:\n{transcript_text[:1500]}\n\n"
         f"TERMS THE LEARNER ALREADY KNOWS:\n{', '.join(known[:60]) or 'none'}\n\n"
         "List up to 3 technical terms/names in the transcript that the learner "
-        "does NOT know (not in their list, and not trivial words). "
+        "does NOT know (not in their list, and not trivial words like "
+        "'training', 'data', 'model'). "
         "Respond ONLY with a JSON array of term strings, e.g. [\"term1\", \"term2\"]."
     )
     raw = call_agent("gap", uid, gap_message)
+    print(f"[gap-detector] raw Lyzr reply: {raw[:300]}")
     terms = _extract_json_array(raw)
-    terms = [t for t in terms if isinstance(t, str) and 1 < len(t.split()) <= 5]
+    terms = [t for t in terms if isinstance(t, str) and 1 < len(t) <= 60
+             and len(t.split()) <= 5]
 
     cards = []
     for term in terms[:3]:
@@ -120,6 +123,7 @@ def detect_gaps(uid: str, transcript_text: str, video_id: str | None = None) -> 
             "explanation": explanation,
             "grounded_in": [c.get("text", "")[:160] for c in chunks],
         })
+    print(f"[gap-detector] {len(terms)} candidate term(s) -> {len(cards)} card(s) built")
     return cards
 
 

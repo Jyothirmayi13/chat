@@ -76,38 +76,55 @@ config.py        Env loading, Qdrant (server or embedded fallback), models
 pwa/             Cross-device frontend (index/app.js/styles/manifest/sw/icon)
 extension/       Chrome extension (progressive enhancement)
 smoke_test.py    End-to-end loop test, no external keys required
+omi_replay.py    Posts spec-exact Omi payloads (deterministic demo fallback)
 ```
 
 ## Setup
 ```bash
-pip install -r requirements.txt
-cp .env.example .env          # fill in Lyzr + Qdrant values
+py -3.13 -m pip install -r requirements.txt    # Windows: use `py -3.13`, plain `python` may point at a bare install
+copy .env.example .env                         # fill in Lyzr values
 
 # Qdrant: Docker (recommended)
-docker run -p 6333:6333 -v $(pwd)/qdrant_storage:/qdrant/storage qdrant/qdrant:latest
+docker run -p 6333:6333 -v %cd%/qdrant_storage:/qdrant/storage qdrant/qdrant:latest
 #   ...or skip Docker: leave QDRANT_URL unreachable and the app uses ./qdrant_data
 
-uvicorn main:app --port 8000   # serves API + PWA at http://localhost:8000
-ngrok http 8000                 # public HTTPS URL for Omi webhooks
+py -3.13 -m uvicorn main:app --host 0.0.0.0 --port 8000   # serves API + PWA
+ngrok http 8000                                            # public HTTPS URL for Omi
 ```
-In Omi **Settings → Developer Mode**, set:
-- Memory-creation webhook → `https://<tunnel>/omi/conversation?uid=YOUR_UID`
-- Real-time transcript webhook → `https://<tunnel>/omi/realtime?uid=YOUR_UID&session_id=s1`
+In Omi **Settings → Developer Settings**, enable the toggles and set:
+- **Conversation Events** → `https://<tunnel>/omi/conversation?uid=YOUR_UID`
+- **Real-time Transcript** → `https://<tunnel>/omi/realtime?uid=YOUR_UID&session_id=s1`
+
+Omi rewrites `uid` with its own account id on every call, so the backend pins
+inbound webhook traffic to `OMI_UID` (defaults to `DEFAULT_UID`, the identity the
+PWA polls as). Set `OMI_UID` in `.env` only if you change that.
+
+Free ngrok shows a "You are about to visit" interstitial to browsers only —
+machine-to-machine webhook posts pass straight through, so test endpoints with
+`curl`, not a browser tab.
 
 Index a lecture for grounding (optional):
 ```bash
-python ingest.py <youtube_video_id>     # or POST /api/ingest_youtube
+py -3.13 omi_replay.py            # spec-exact Omi payloads, no phone needed
+py -3.13 ingest.py <youtube_video_id>
 ```
 
 ## Demo script (≤5 min)
-1. Speak/queue a lecture clip → show transcript chunks appear in Qdrant dashboard.
-2. A **proactive card pops up on the phone PWA** for a term you never asked about → tap "Got it" → it enters the vault.
-3. Ask a question in the **Ask** tab → expand the live **agent pipeline** logs → grounded answer.
-4. Open **Vault** → known concepts + due-for-review; tap ✕ to **forget** (privacy).
-5. Name the track and show the Omi → Qdrant → Lyzr → back-to-user loop on screen.
+1. Open the PWA on your phone (`https://<tunnel>`) and leave **Live Coach** on screen.
+2. In Omi, tap the **record dot** and speak a sentence containing an unknown term —
+   cards appear on the phone **while you are still talking** (real-time transcript webhook).
+3. Tap **"Got it"** on a card → it enters the **Vault** at Lv 1.
+4. **Ask** tab → ask about that term → expand the live **agent pipeline** logs → grounded answer.
+5. **Vault** tab → known concepts + due-for-review; tap ✕ to **forget** (privacy).
+6. Name the track and show the Omi → Qdrant → Lyzr → back-to-user loop on screen.
+   If the tunnel drops mid-recording, `py -3.13 omi_replay.py` reproduces step 2's
+   effect from the laptop.
 
 ## Verification
-`python smoke_test.py` runs the full memory + agent loop with the embedded Qdrant fallback and no external keys (Lyzr calls return a clear stub when unset). All six checks pass.
+`py -3.13 smoke_test.py` runs the full memory + agent loop with the embedded Qdrant
+fallback and no external keys (Lyzr calls return a clear stub when unset). All six
+checks pass. The Omi leg is verified live from the Omi phone app with **no wearable
+hardware** — both webhook types reach the backend and drive real cards.
 
 ## Submit
 Public repo · deployed PWA URL · ≤5-min demo video · track named here · no committed keys.

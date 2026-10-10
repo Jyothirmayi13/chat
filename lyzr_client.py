@@ -7,6 +7,8 @@ agent when the specialist is not configured, so the workflow runs even with
 a single Studio agent.
 """
 
+import uuid
+
 import requests
 
 from config import (
@@ -35,7 +37,9 @@ def call_agent(role: str, user_id: str, message: str, session_id: str | None = N
     payload = {
         "user_id": user_id,
         "agent_id": agent_id,
-        "session_id": session_id or f"{agent_id}-{user_id}",
+        # Fresh session per call: with Lyzr Memory on, a shared session makes
+        # agents parrot their previous step's answer.
+        "session_id": session_id or f"{agent_id}-{user_id}-{uuid.uuid4().hex[:8]}",
         "message": message,
     }
     try:

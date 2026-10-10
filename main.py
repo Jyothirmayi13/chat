@@ -7,6 +7,7 @@ The PWA also posts to /api/transcript so it works on any device even when
 the Omi app is not streaming (web-mic fallback).
 """
 
+import os
 import threading
 import time
 import uuid as uuidlib
@@ -23,6 +24,10 @@ import memory
 from config import DEFAULT_UID
 
 app = FastAPI(title="LearnLoop — Voice-first Learning Copilot")
+
+# Omi rewrites ?uid= with its own internal account id, so webhook traffic must
+# be pinned to the learner identity the PWA polls as. Override with OMI_UID.
+OMI_UID = os.getenv("OMI_UID") or DEFAULT_UID
 
 app.add_middleware(
     CORSMiddleware,
@@ -80,10 +85,19 @@ def _surface_gaps(uid: str, text: str, video_id: str | None):
 
 
 # ── Omi webhooks ────────────────────────────────────────────────
+@app.get("/omi/realtime")
+@app.get("/omi/conversation")
+def omi_hook_ping():
+    """Omi pings a webhook with GET to verify it before saving the URL."""
+    return {"status": "ok", "endpoint": "learnloop"}
+
+
 @app.post("/omi/realtime")
 def omi_realtime(background: BackgroundTasks, uid: str = Query(DEFAULT_UID),
-                 session_id: str = Query(""), payload: dict = Body(...)):
-    """Real-time transcript batches while Omi is listening. Reply fast."""
+                 session_id: str = Query(""), payload: list | dict = Body(...)):
+    """Real-time transcript batches while Omi is listening. Reply fast.
+    Omi posts a bare array of segments; some clients wrap it in an object."""
+    uid = OMI_UID
     segments = payload if isinstance(payload, list) else payload.get("segments", [])
     text = " ".join(s.get("text", "") for s in segments).strip()
     if text:
@@ -96,6 +110,9 @@ def omi_realtime(background: BackgroundTasks, uid: str = Query(DEFAULT_UID),
 def omi_conversation(background: BackgroundTasks, uid: str = Query(DEFAULT_UID),
                      payload: dict = Body(...)):
     """Finished conversation: full transcript + structured summary."""
+    uid = OMI_UID
+    if payload.get("discarded"):
+        return {"status": "skipped"}
     segments = payload.get("transcript_segments", [])
     transcript = " ".join(s.get("text", "") for s in segments)
     overview = (payload.get("structured") or {}).get("overview", "")

@@ -160,7 +160,7 @@ def store_concept(uid: str, concept: str, explanation: str, mastery: int = 1):
         ),
         limit=1,
     ).points
-    if existing and existing[0].score >= 0.9:
+    if existing and existing[0].score >= 0.82:
         pid = existing[0].id
         prev = existing[0].payload.get("mastery", 0)
         mastery = min(5, prev + 1)

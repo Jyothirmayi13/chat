@@ -30,6 +30,14 @@ let listening = false;
 let buffer = "";
 let flushTimer = null;
 
+const heardBox = document.getElementById("heard");
+const heardText = document.getElementById("heard-text");
+
+function showHeard(text, note = "") {
+  heardBox.classList.remove("hidden");
+  heardText.textContent = text + (note ? ` ${note}` : "");
+}
+
 const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (!SpeechAPI) {
   micBtn.disabled = true;
@@ -39,16 +47,47 @@ if (!SpeechAPI) {
   recognition.lang = "en-US";
   recognition.continuous = true;
   recognition.interimResults = true;
+  recognition.onstart = () => {
+    console.log("[mic] recognition started");
+    micState.textContent = "Listening… speak now";
+  };
   recognition.onresult = (e) => {
     let interim = "";
-    for (const r of e.results[e.resultIndex]) {
-      if (r.isFinal) buffer += r[0].transcript + " ";
-      else interim += r[0].transcript;
+    // e.results[i] is a result; its [0] is the top transcript alternative.
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const res = e.results[i];
+      if (res.isFinal) buffer += res[0].transcript + " ";
+      else interim += res[0].transcript;
     }
-    micState.textContent = interim ? `Hearing: ${interim.slice(0, 40)}` : "Listening…";
+    console.log("[mic] result. interim:", interim, "| buffer:", buffer);
+    const heard = (buffer + " " + interim).trim();
+    if (heard) showHeard(heard);
+    micState.textContent = interim ? "Hearing you…" : "Listening… speak now";
     scheduleFlush();
   };
-  recognition.onerror = () => stopMic();
+  // Chrome kills recognition after ~5s of silence; restart while user wants live mode.
+  recognition.onend = () => {
+    console.log("[mic] recognition ended, listening =", listening);
+    if (listening) {
+      setTimeout(() => {
+        if (!listening) return;
+        try { recognition.start(); } catch (err) { console.log("[mic] restart failed", err); }
+      }, 350);
+    }
+  };
+  recognition.onerror = (e) => {
+    console.log("[mic] error:", e.error);
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      micState.textContent = "Mic blocked — click the 🔇/mic icon in the address bar and Allow";
+      listening = false;
+      micBtn.classList.remove("listening");
+    } else if (e.error !== "aborted" && e.error !== "no-speech") {
+      micState.textContent = `Mic error: ${e.error} — tap the mic to retry`;
+      listening = false;
+      micBtn.classList.remove("listening");
+    }
+    flushTranscript();
+  };
 }
 
 function scheduleFlush() {
@@ -60,17 +99,23 @@ async function flushTranscript() {
   if (!buffer.trim()) return;
   const text = buffer.trim();
   buffer = "";
-  await fetch(`${API}/api/transcript`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, uid, source: "web-mic" }),
-  });
+  showHeard(text, "→ sending to coach…");
+  try {
+    await fetch(`${API}/api/transcript`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, uid, source: "web-mic" }),
+    });
+    showHeard(text, "✓ sent — cards incoming");
+  } catch {
+    showHeard(text, "✗ could not reach server");
+  }
 }
 
 function startMic() {
   listening = true;
   micBtn.classList.add("listening");
-  recognition.start();
+  try { recognition.start(); } catch (err) { console.log("[mic] start threw:", err); }
 }
 function stopMic() {
   listening = false;
