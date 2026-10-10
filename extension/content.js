@@ -8,7 +8,7 @@
  */
 
 const HOST = "learnloop-coach";
-let backend = "http://localhost:8000";
+let backend = "https://learnloop-xh10.onrender.com";
 let shadow = null;
 let panel = null;
 let badge = null;
@@ -80,7 +80,27 @@ function mount() {
 
   panel = shadow.querySelector(".p");
   badge = shadow.querySelector(".n");
-  shadow.querySelector(".btn").addEventListener("click", () => panel.classList.toggle("open"));
+  const btn = shadow.querySelector(".btn");
+  btn.addEventListener("click", async () => {
+    panel.classList.toggle("open");
+    // The backend analyses nothing until the coach is on, so opening the panel
+    // is the learner's opt-in for this session.
+    if (panel.classList.contains("open") && !coachOn) {
+      coachOn = true;
+      btn.classList.remove("off");
+      try {
+        await fetch(`${backend}/api/coach`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uid: "learner", on: true }),
+        });
+      } catch {
+        /* backend asleep — retry on next open */
+        coachOn = false;
+        btn.classList.add("off");
+      }
+    }
+  });
 }
 
 function render() {
