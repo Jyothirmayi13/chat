@@ -5,7 +5,7 @@
  * The same backend powers the mobile/desktop PWA, so this is optional.
  */
 
-const DEFAULT_BACKEND = "http://localhost:8000";
+const DEFAULT_BACKEND = "https://learnloop-xh10.onrender.com";
 let BACKEND_URL = DEFAULT_BACKEND;
 
 // Allow overriding the backend URL (e.g. deployed demo) without editing code.

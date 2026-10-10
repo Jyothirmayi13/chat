@@ -22,6 +22,34 @@ function toast(msg) {
   setTimeout(() => t.classList.add("hidden"), 1800);
 }
 
+// ── Coach switch: the only thing that lets audio be analysed ────
+const coachBtn = document.getElementById("coach-toggle");
+const coachStatus = document.getElementById("coach-status");
+let coachOn = false;
+
+async function setCoach(on) {
+  await fetch(`${API}/api/coach`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uid, on }),
+  });
+  coachOn = on;
+  coachBtn.textContent = on ? "Coach: on" : "Coach: off";
+  coachBtn.classList.toggle("off", !on);
+  coachBtn.setAttribute("aria-pressed", String(on));
+  document.querySelector(".statusbar").classList.toggle("off", !on);
+  coachStatus.textContent = on
+    ? "Listening — unknown terms get explained before you ask."
+    : "Nothing is analysed until you turn the coach on.";
+  if (!on) stopMic();
+}
+coachBtn.addEventListener("click", () => setCoach(!coachOn));
+
+// Leaving the tab should never leave a microphone running behind it.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && listening) stopMic();
+});
+
 // ── Voice capture (web-mic fallback for any device) ──────────────
 const micBtn = document.getElementById("mic-btn");
 const micState = document.getElementById("mic-state");
@@ -113,6 +141,7 @@ async function flushTranscript() {
 }
 
 function startMic() {
+  if (!coachOn) setCoach(true);   // tapping the mic is itself the opt-in
   listening = true;
   micBtn.classList.add("listening");
   try { recognition.start(); } catch (err) { console.log("[mic] start threw:", err); }

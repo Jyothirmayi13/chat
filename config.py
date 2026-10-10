@@ -29,6 +29,10 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None
 # ── Identity ────────────────────────────────────────────────────
 DEFAULT_UID = os.getenv("DEFAULT_UID", "learner")
 
+# Comma-separated phrases. Any transcript chunk containing one is discarded
+# before it reaches Qdrant or Lyzr — the escape hatch for "my mic is open".
+DROP_WORDS = [w.strip().lower() for w in os.getenv("DROP_WORDS", "").split(",") if w.strip()]
+
 # Embedding model: BAAI/bge-small-en-v1.5 -> 384-dim vectors.
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 VECTOR_SIZE = 384

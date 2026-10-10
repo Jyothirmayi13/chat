@@ -21,7 +21,7 @@ from pydantic import BaseModel
 import agents
 import ingest
 import memory
-from config import DEFAULT_UID
+from config import DEFAULT_UID, DROP_WORDS
 
 app = FastAPI(title="LearnLoop — Voice-first Learning Copilot")
 
@@ -40,6 +40,8 @@ app.add_middleware(
 PENDING: dict[str, deque] = defaultdict(deque)
 # Terms already surfaced per user, so we never spam the same card twice.
 SURFACED: dict[str, set] = defaultdict(set)
+# No audio is analysed until the learner flips the coach on. Off by default.
+ACTIVE: dict[str, bool] = {}
 LOCK = threading.Lock()
 
 
@@ -64,6 +66,9 @@ class IngestRequest(BaseModel):
 
 def _surface_gaps(uid: str, text: str, video_id: str | None):
     """Run gap detection and queue new cards (runs off the request thread)."""
+    if not ACTIVE.get(uid, False):
+        print(f"[coach] off for {uid} — no audio analysed")
+        return
     try:
         cards = agents.detect_gaps(uid, text, video_id)
     except Exception as e:
@@ -84,6 +89,12 @@ def _surface_gaps(uid: str, text: str, video_id: str | None):
     print(f"[proactive] queued {len(cards)} candidate card(s) for {uid}")
 
 
+def _blocked(text: str) -> bool:
+    """True if the chunk contains a phrase the learner marked as private."""
+    low = text.lower()
+    return any(w in low for w in DROP_WORDS)
+
+
 def _lecture_only(segments: list) -> str:
     """Transcript text minus the learner's own speech.
 
@@ -93,6 +104,18 @@ def _lecture_only(segments: list) -> str:
     return " ".join(
         s.get("text", "") for s in segments if not s.get("is_user")
     ).strip()
+
+
+def _intake(uid: str, text: str, lecture: str, source: str,
+            video_id: str | None, background: BackgroundTasks):
+    """Store lecture context and queue gap detection — unless marked private."""
+    if not text or _blocked(text):
+        if _blocked(text):
+            print(f"[privacy] chunk dropped for {uid} ({source})")
+        return
+    memory.remember_context(uid, text, source=source, video_id=video_id)
+    if lecture and ACTIVE.get(uid, False):
+        background.add_task(_surface_gaps, uid, lecture, video_id)
 
 
 # ── Omi webhooks ────────────────────────────────────────────────
@@ -110,12 +133,8 @@ def omi_realtime(background: BackgroundTasks, uid: str = Query(DEFAULT_UID),
     Omi posts a bare array of segments; some clients wrap it in an object."""
     uid = OMI_UID
     segments = payload if isinstance(payload, list) else payload.get("segments", [])
-    text = " ".join(s.get("text", "") for s in segments).strip()
-    lecture = _lecture_only(segments)
-    if text:
-        memory.remember_context(uid, text, source="omi-realtime")
-    if lecture:
-        background.add_task(_surface_gaps, uid, lecture, None)
+    _intake(uid, " ".join(s.get("text", "") for s in segments).strip(),
+            _lecture_only(segments), "omi-realtime", None, background)
     return {"status": "ok"}
 
 
@@ -127,14 +146,9 @@ def omi_conversation(background: BackgroundTasks, uid: str = Query(DEFAULT_UID),
     if payload.get("discarded"):
         return {"status": "skipped"}
     segments = payload.get("transcript_segments", [])
-    transcript = " ".join(s.get("text", "") for s in segments)
     overview = (payload.get("structured") or {}).get("overview", "")
-    text = (overview + " " + transcript).strip()
-    lecture = _lecture_only(segments)
-    if text:
-        memory.remember_context(uid, text, source="omi-conversation")
-    if lecture:
-        background.add_task(_surface_gaps, uid, lecture, None)
+    _intake(uid, (overview + " " + " ".join(s.get("text", "") for s in segments)).strip(),
+            _lecture_only(segments), "omi-conversation", None, background)
     return {"status": "ok"}
 
 
@@ -148,11 +162,23 @@ def health():
 def api_transcript(req: TranscriptRequest, background: BackgroundTasks):
     """Browser-mic transcript (works on any device, no Omi needed)."""
     uid = req.uid or DEFAULT_UID
-    if req.text.strip():
-        memory.remember_context(uid, req.text.strip(),
-                                video_id=req.video_id, source=req.source)
-        background.add_task(_surface_gaps, uid, req.text.strip(), req.video_id)
+    _intake(uid, req.text.strip(), req.text.strip(), req.source,
+            req.video_id, background)
     return {"status": "ok"}
+
+
+@app.post("/api/coach")
+def api_coach(body: dict = Body(...)):
+    """Learner-controlled switch: nothing is analysed until this is on."""
+    uid = body.get("uid") or DEFAULT_UID
+    ACTIVE[uid] = bool(body.get("on"))
+    print(f"[coach] {'ON' if ACTIVE[uid] else 'OFF'} for {uid}")
+    return {"status": "ok", "coach": ACTIVE[uid]}
+
+
+@app.get("/api/coach")
+def api_coach_state(uid: str = Query(DEFAULT_UID)):
+    return {"coach": ACTIVE.get(uid, False)}
 
 
 @app.post("/api/ingest_youtube")
