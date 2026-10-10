@@ -84,6 +84,17 @@ def _surface_gaps(uid: str, text: str, video_id: str | None):
     print(f"[proactive] queued {len(cards)} candidate card(s) for {uid}")
 
 
+def _lecture_only(segments: list) -> str:
+    """Transcript text minus the learner's own speech.
+
+    Omi tags the wearer's voice with is_user. Running gap detection over what
+    the learner just asked produces cards labelled "you didn't ask".
+    """
+    return " ".join(
+        s.get("text", "") for s in segments if not s.get("is_user")
+    ).strip()
+
+
 # ── Omi webhooks ────────────────────────────────────────────────
 @app.get("/omi/realtime")
 @app.get("/omi/conversation")
@@ -100,9 +111,11 @@ def omi_realtime(background: BackgroundTasks, uid: str = Query(DEFAULT_UID),
     uid = OMI_UID
     segments = payload if isinstance(payload, list) else payload.get("segments", [])
     text = " ".join(s.get("text", "") for s in segments).strip()
+    lecture = _lecture_only(segments)
     if text:
         memory.remember_context(uid, text, source="omi-realtime")
-        background.add_task(_surface_gaps, uid, text, None)
+    if lecture:
+        background.add_task(_surface_gaps, uid, lecture, None)
     return {"status": "ok"}
 
 
@@ -117,9 +130,11 @@ def omi_conversation(background: BackgroundTasks, uid: str = Query(DEFAULT_UID),
     transcript = " ".join(s.get("text", "") for s in segments)
     overview = (payload.get("structured") or {}).get("overview", "")
     text = (overview + " " + transcript).strip()
+    lecture = _lecture_only(segments)
     if text:
         memory.remember_context(uid, text, source="omi-conversation")
-        background.add_task(_surface_gaps, uid, text, None)
+    if lecture:
+        background.add_task(_surface_gaps, uid, lecture, None)
     return {"status": "ok"}
 
 

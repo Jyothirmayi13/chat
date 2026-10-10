@@ -95,8 +95,12 @@ def detect_gaps(uid: str, transcript_text: str, video_id: str | None = None) -> 
         f"LECTURE TRANSCRIPT:\n{transcript_text[:1500]}\n\n"
         f"TERMS THE LEARNER ALREADY KNOWS:\n{', '.join(known[:60]) or 'none'}\n\n"
         "List up to 3 technical terms/names in the transcript that the learner "
-        "does NOT know (not in their list, and not trivial words like "
-        "'training', 'data', 'model'). "
+        "does NOT know (not in their list). Skip vocabulary any first-week "
+        "ML student has heard — such as token, model, data, training, layer, "
+        "network, function, parameter, algorithm, system, output, input, "
+        "probability, matrix. Only flag terms a learner would genuinely have "
+        "to pause and look up: named techniques, architectures, papers, "
+        "people, libraries, specific mechanisms. "
         "Respond ONLY with a JSON array of term strings, e.g. [\"term1\", \"term2\"]."
     )
     raw = call_agent("gap", uid, gap_message)

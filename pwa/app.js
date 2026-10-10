@@ -134,10 +134,14 @@ function renderCard(card) {
   emptyEl.style.display = "none";
   const el = document.createElement("div");
   el.className = "card";
+  const heard = (card.grounded_in || []).filter(Boolean).slice(0, 1)
+    .map(q => `<p class="why">Heard in this lecture: “${escapeHtml(q)}”</p>`)
+    .join("");
   el.innerHTML = `
     <span class="tag">Proactive · you didn't ask</span>
     <h3>${escapeHtml(card.term)}</h3>
     <p>${escapeHtml(card.explanation)}</p>
+    ${heard}
     <div class="actions">
       <button class="btn-got">Got it — add to vault</button>
       <button class="btn-dismiss">Not now</button>
