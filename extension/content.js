@@ -64,12 +64,15 @@ function mount() {
       .btn.off{background:#1c2333;color:#9aa7bd}
       .n{position:absolute;top:-4px;right:-4px;min-width:19px;height:19px;border-radius:999px;
         background:#f59e0b;color:#1a1204;font-size:11px;font-weight:700;display:none;place-items:center;padding:0 4px}
-      .p{position:absolute;bottom:56px;right:0;width:320px;max-height:60vh;overflow:auto;
+      .p{position:absolute;bottom:56px;right:0;width:320px;height:70vh;
         background:#0b1020;color:#e6edf3;border:1px solid #ffffff1f;border-radius:14px;
-        padding:12px;display:none;font-family:system-ui,sans-serif}
-      .p.open{display:block}
+        padding:12px;display:none;flex-direction:column;font-family:system-ui,sans-serif}
+      .p.open{display:flex}
+      .hd{display:flex;justify-content:space-between;align-items:baseline}
       .h{font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:#f59e0b;margin:0 0 4px}
+      .x{font-size:11px;color:#7dd3fc;cursor:pointer;text-decoration:underline}
       .s{font-size:11px;color:#5eead4;margin:0 0 8px;min-height:14px}
+      .l{overflow:auto;flex:1;min-height:40px}
       .c{border-top:1px solid #ffffff14;padding:10px 0}
       .c b{display:block;color:#7dd3fc;font-size:14px;margin-bottom:4px}
       .c p{margin:0 0 6px;font-size:13px;line-height:1.45}
@@ -82,9 +85,25 @@ function mount() {
       .g{background:#34d399;color:#06251a}
       .d{background:#ffffff12;color:#9aa7bd}
       .e{font-size:12px;color:#8b98ad;text-align:center;padding:14px 0}
+      .q{display:flex;gap:6px;margin-top:8px}
+      .q input{flex:1;min-width:0;background:#121a2e;border:1px solid #ffffff26;border-radius:8px;
+        color:#e6edf3;padding:7px 9px;font-size:12px;font-family:inherit}
+      .q button{padding:6px 12px;border-radius:8px;border:0;font-size:12px;font-weight:700;
+        cursor:pointer;background:#7dd3fc;color:#06222e}
+      .ans{font-size:12px;line-height:1.5;margin-top:8px;max-height:22vh;overflow:auto}
+      .ans details{margin:0 0 6px}
+      .ans summary{font-size:11px;color:#8b98ad;cursor:pointer}
+      .ans ol{margin:4px 0 0;padding-left:16px;font-size:11px;color:#8b98ad;line-height:1.5}
+      .ans .at{margin:0;color:#e6edf3}
     </style>
     <button class="btn off" title="LearnLoop coach">🧠<span class="n"></span></button>
-    <div class="p"><p class="h">Proactive · you didn't ask</p><p class="s"></p><div class="l"><div class="e">No cards yet.</div></div></div>`;
+    <div class="p">
+      <div class="hd"><p class="h">Proactive · you didn't ask</p><span class="x" title="Open the full LearnLoop app">full app ↗</span></div>
+      <p class="s"></p>
+      <div class="l"><div class="e">No cards yet.</div></div>
+      <div class="q"><input type="text" placeholder="Ask about anything in this video" /><button>Ask</button></div>
+      <div class="ans"></div>
+    </div>`;
 
   panel = shadow.querySelector(".p");
   badge = shadow.querySelector(".n");
@@ -117,6 +136,42 @@ function mount() {
       setStatus("Coach off — nothing is read");
     }
   });
+
+  shadow.querySelector(".x").addEventListener("click", () => {
+    window.open(`${backend}/?as=learner`, "_blank", "noopener");
+  });
+
+  const askInput = shadow.querySelector(".q input");
+  const askBtn = shadow.querySelector(".q button");
+  const ansEl = shadow.querySelector(".ans");
+
+  async function ask() {
+    const query = askInput.value.trim();
+    if (!query) return;
+    askBtn.disabled = true;
+    ansEl.innerHTML = '<p class="at">Thinking…</p>';
+    try {
+      const r = await fetch(`${backend}/api/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, uid: "learner", video_id: getVideoId(),
+                               timestamp: getCurrentTimestamp() }),
+      });
+      const data = await r.json();
+      const steps = (data.logs || []).map((l) => `<li>${bold(escapeHtml(l))}</li>`).join("");
+      ansEl.innerHTML = `<details><summary>Agent pipeline (${(data.logs || []).length} steps)</summary>
+        <ol>${steps}</ol></details><p class="at"></p>`;
+      ansEl.querySelector(".at").textContent = data.final_answer || "No answer.";
+    } catch {
+      ansEl.innerHTML = '<p class="at">Backend unreachable — try again.</p>';
+    }
+    askBtn.disabled = false;
+    askInput.value = "";
+  }
+  askBtn.addEventListener("click", ask);
+  askInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") ask();
+  });
 }
 
 function setStatus(msg) {
@@ -126,6 +181,12 @@ function setStatus(msg) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// Log lines arrive with **emphasis**; escaping runs first, so only this
+// transform can add markup.
+function bold(s) {
+  return s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
 }
 
 // ── Caption reader: the video's own words, never a microphone ────
