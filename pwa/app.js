@@ -66,6 +66,7 @@ let recognition = null;
 let listening = false;
 let buffer = "";
 let flushTimer = null;
+let folded = 0;  // results already merged into buffer, so no transcript is counted twice
 
 const heardBox = document.getElementById("heard");
 const heardText = document.getElementById("heard-text");
@@ -82,9 +83,11 @@ if (!SpeechAPI) {
 } else {
   recognition = new SpeechAPI();
   recognition.lang = "en-US";
-  recognition.continuous = true;
-  recognition.interimResults = true;
+  recognition.continuous = false;      // Android keeps one results list alive across its silent
+  recognition.interimResults = true;   // auto-restarts while resultIndex resets to 0, which
+  recognition.maxAlternatives = 1;     // re-merged every final line into the buffer.
   recognition.onstart = () => {
+    folded = 0;
     console.log("[mic] recognition started");
     micState.textContent = "Listening… speak now";
   };
@@ -93,8 +96,10 @@ if (!SpeechAPI) {
     // e.results[i] is a result; its [0] is the top transcript alternative.
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const res = e.results[i];
-      if (res.isFinal) buffer += res[0].transcript + " ";
-      else interim += res[0].transcript;
+      if (res.isFinal) {
+        if (i >= folded) buffer += res[0].transcript + " ";
+        folded = i + 1;
+      } else interim += res[0].transcript;
     }
     console.log("[mic] result. interim:", interim, "| buffer:", buffer);
     const heard = (buffer + " " + interim).trim();
