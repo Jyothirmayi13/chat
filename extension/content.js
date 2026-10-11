@@ -1,9 +1,11 @@
 /**
  * content.js — the floating coach on YouTube watch pages.
  *
- * Two jobs:
- *  1. Expose video id + playback time to popup.js (grounding context).
- *  2. Show a corner bubble that quietly collects proactive cards, so clearing
+ * Three jobs:
+ *  1. Read the video's own caption cues while it plays, so the words arrive
+ *     correctly spelled and in step with playback — no microphone involved.
+ *  2. Expose video id + playback time to popup.js (grounding context).
+ *  3. Show a corner bubble that quietly collects proactive cards, so clearing
  *     a doubt never means leaving the video or losing your place.
  */
 
@@ -12,6 +14,7 @@ let backend = "https://learnloop-xh10.onrender.com";
 let shadow = null;
 let panel = null;
 let badge = null;
+let statusEl = null;
 let coachOn = false;
 const queue = [];
 
@@ -65,11 +68,15 @@ function mount() {
         background:#0b1020;color:#e6edf3;border:1px solid #ffffff1f;border-radius:14px;
         padding:12px;display:none;font-family:system-ui,sans-serif}
       .p.open{display:block}
-      .h{font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:#f59e0b;margin:0 0 8px}
+      .h{font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:#f59e0b;margin:0 0 4px}
+      .s{font-size:11px;color:#5eead4;margin:0 0 8px;min-height:14px}
       .c{border-top:1px solid #ffffff14;padding:10px 0}
       .c b{display:block;color:#7dd3fc;font-size:14px;margin-bottom:4px}
       .c p{margin:0 0 6px;font-size:13px;line-height:1.45}
       .c i{display:block;font-size:11px;color:#8b98ad;margin-bottom:8px}
+      .c details{margin:0 0 8px}
+      .c summary{font-size:11px;color:#8b98ad;cursor:pointer}
+      .c ol{margin:6px 0 0;padding-left:18px;font-size:11px;color:#8b98ad;line-height:1.5}
       .a{display:flex;gap:6px}
       .a button{flex:1;padding:6px;border-radius:8px;border:0;font-size:12px;font-weight:600;cursor:pointer}
       .g{background:#34d399;color:#06251a}
@@ -77,31 +84,145 @@ function mount() {
       .e{font-size:12px;color:#8b98ad;text-align:center;padding:14px 0}
     </style>
     <button class="btn off" title="LearnLoop coach">🧠<span class="n"></span></button>
-    <div class="p"><p class="h">Proactive · you didn't ask</p><div class="l"><div class="e">No cards yet.</div></div></div>`;
+    <div class="p"><p class="h">Proactive · you didn't ask</p><p class="s"></p><div class="l"><div class="e">No cards yet.</div></div></div>`;
 
   panel = shadow.querySelector(".p");
   badge = shadow.querySelector(".n");
+  statusEl = shadow.querySelector(".s");
   const btn = shadow.querySelector(".btn");
   btn.addEventListener("click", async () => {
     panel.classList.toggle("open");
-    // The backend analyses nothing until the coach is on, so opening the panel
-    // is the learner's opt-in for this session.
-    if (panel.classList.contains("open") && !coachOn) {
-      coachOn = true;
-      btn.classList.remove("off");
-      try {
-        await fetch(`${backend}/api/coach`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ uid: "learner", on: true }),
-        });
-      } catch {
-        /* backend asleep — retry on next open */
-        coachOn = false;
-        btn.classList.add("off");
-      }
+    const want = panel.classList.contains("open");
+    if (want === coachOn) return;
+    // Opening the bubble is the learner's opt-in: nothing is read until then.
+    try {
+      await fetch(`${backend}/api/coach`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: "learner", on: want }),
+      });
+    } catch {
+      panel.classList.remove("open");
+      setStatus("Backend unreachable — coach stayed off");
+      return;
+    }
+    coachOn = want;
+    btn.classList.toggle("off", !want);
+    if (want) {
+      ensureCaptionsOn();
+      startCapture();
+      setStatus("Reading the video's captions…");
+    } else {
+      stopCapture();
+      setStatus("Coach off — nothing is read");
     }
   });
+}
+
+function setStatus(msg) {
+  if (statusEl) statusEl.textContent = msg;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// ── Caption reader: the video's own words, never a microphone ────
+const CAPTION_SELECTOR = ".ytp-caption-segment, .caption-window span";
+const FLUSH_WORDS = 45;   // ~15-20 s of lecture speech per memory chunk
+let seenCues = new Set();
+let capWords = [];
+let capStart = 0;
+let capTimer = null;
+let capVideo = null;
+
+function videoTime() {
+  const v = document.querySelector("video");
+  return v && v.readyState ? Math.floor(v.currentTime) : 0;
+}
+
+function cueTexts() {
+  const v = document.querySelector("video");
+  const tracks = v && v.textTracks ? Array.from(v.textTracks) : [];
+  const out = [];
+  for (const t of tracks) {
+    if ((t.kind !== "subtitles" && t.kind !== "captions") || !t.activeCues) continue;
+    for (const c of t.activeCues) if (c.text && c.text.trim()) out.push(c.text.trim());
+  }
+  if (out.length) return out;
+  for (const node of document.querySelectorAll(CAPTION_SELECTOR)) {
+    const text = (node.textContent || "").trim();
+    if (text) out.push(text);
+  }
+  return out;
+}
+
+function ensureCaptionsOn() {
+  const v = document.querySelector("video");
+  for (const t of (v && v.textTracks ? Array.from(v.textTracks) : [])) {
+    if ((t.kind === "subtitles" || t.kind === "captions") && t.mode === "disabled") {
+      try { t.mode = "hidden"; } catch { /* the player owns this track */ }
+    }
+  }
+  const off = document.querySelector(".ytp-subtitles-button[aria-pressed='false']");
+  if (off) off.click();
+}
+
+function captureTick() {
+  const id = getVideoId();
+  if (id !== capVideo) {           // YouTube swaps videos without reloading
+    capVideo = id;
+    seenCues = new Set();
+    capWords = [];
+    capStart = 0;
+  }
+  const v = document.querySelector("video");
+  if (!v || v.paused) return;
+  let fresh = false;
+  for (const text of cueTexts()) {
+    const key = text.toLowerCase();
+    if (seenCues.has(key)) continue;
+    seenCues.add(key);
+    if (seenCues.size > 400) seenCues = new Set([key]);
+    if (!capStart) capStart = videoTime();
+    capWords.push(text);
+    fresh = true;
+  }
+  if (!fresh) return;
+  setStatus(`Reading captions · ${formatTimestamp(capStart)}`);
+  if (capWords.join(" ").split(/\s+/).length >= FLUSH_WORDS) sendCaptions();
+}
+
+async function sendCaptions() {
+  if (!capWords.length) return;
+  const text = capWords.join(" ").replace(/\s+/g, " ").trim();
+  const from = capStart;
+  const to = Math.max(videoTime(), from + 1);
+  capWords = [];
+  capStart = 0;
+  try {
+    await fetch(`${backend}/api/transcript`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, uid: "learner", video_id: getVideoId(),
+                             source: "youtube-captions", start_time: from, end_time: to }),
+    });
+    setStatus(`Sent ${text.split(/\s+/).length} words from ${formatTimestamp(from)}`);
+  } catch {
+    setStatus("Backend unreachable — that chunk was not sent");
+  }
+}
+
+function startCapture() {
+  if (capTimer) return;
+  capTimer = setInterval(captureTick, 800);
+}
+
+function stopCapture() {
+  clearInterval(capTimer);
+  capTimer = null;
+  sendCaptions();
 }
 
 function render() {
@@ -117,11 +238,13 @@ function render() {
     const el = document.createElement("div");
     el.className = "c";
     const quote = (card.grounded_in || [])[0] || "";
+    const steps = (card.trace || []).map((s) => `<li>${escapeHtml(s)}</li>`).join("");
     el.innerHTML = `<b></b><p></p>${quote ? "<i></i>" : ""}
+      ${steps ? `<details><summary>How this card was made</summary><ol>${steps}</ol></details>` : ""}
       <div class="a"><button class="g">Got it</button><button class="d">Not now</button></div>`;
     el.querySelector("b").textContent = card.term;
     el.querySelector("p").textContent = card.explanation;
-    if (quote) el.querySelector("i").textContent = `Heard at ${getCurrentTimestamp() || "?"}: ${quote}`;
+    if (quote) el.querySelector("i").textContent = `From the video: ${quote}`;
     const drop = () => { queue.splice(queue.indexOf(card), 1); render(); };
     el.querySelector(".d").addEventListener("click", drop);
     el.querySelector(".g").addEventListener("click", async () => {

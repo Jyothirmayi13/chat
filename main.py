@@ -61,6 +61,8 @@ class TranscriptRequest(BaseModel):
     uid: str | None = None
     video_id: str | None = None
     source: str = "web"
+    start_time: int | None = None
+    end_time: int | None = None
 
 
 class IngestRequest(BaseModel):
@@ -121,17 +123,22 @@ def _lecture_only(segments: list) -> str:
 
 def _intake(uid: str, text: str, lecture: str, source: str,
             video_id: str | None, background: BackgroundTasks,
-            notify_uid: str | None = None):
+            notify_uid: str | None = None,
+            span: tuple[int | None, int | None] = (None, None)):
     """Store lecture context and queue gap detection — unless marked private."""
     if not text or _blocked(text):
         if _blocked(text):
             print(f"[privacy] chunk dropped for {uid} ({source})")
         return
-    memory.remember_context(uid, text, source=source, video_id=video_id)
+    start_time, end_time = span
+    memory.remember_context(uid, text, source=source, video_id=video_id,
+                            start_time=start_time, end_time=end_time)
     if lecture and ACTIVE.get(uid, False):
         trace = [f"{source}: {len(lecture.split())} lecture word(s) received"]
         if len(lecture) < len(text):
             trace.append("Your own speech (is_user) kept out of gap detection")
+        if start_time is not None:
+            trace.append(f"Spoken at {start_time // 60}:{start_time % 60:02d} in the video")
         trace.append(f"Qdrant lecture_context: chunk embedded + stored (uid={uid})")
         background.add_task(_surface_gaps, uid, lecture, video_id, trace, notify_uid)
 
@@ -206,10 +213,11 @@ def health():
 
 @app.post("/api/transcript")
 def api_transcript(req: TranscriptRequest, background: BackgroundTasks):
-    """Browser-mic transcript (works on any device, no Omi needed)."""
+    """Live text into memory: browser mic, or the extension reading captions."""
     uid = req.uid or DEFAULT_UID
     _intake(uid, req.text.strip(), req.text.strip(), req.source,
-            req.video_id, background)
+            req.video_id, background,
+            span=(req.start_time, req.end_time))
     return {"status": "ok"}
 
 
