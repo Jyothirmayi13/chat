@@ -154,5 +154,5 @@ def detect_gaps(uid: str, transcript_text: str, video_id: str | None = None,
 
 # ── Review scheduling ───────────────────────────────────────────
 def review_digest(uid: str) -> list[dict]:
-    """Concepts whose spaced-repetition window is due — feeds the review view."""
-    return memory.due_for_review(uid)
+    """Due concepts first, then the soonest upcoming ones — feeds the review view."""
+    return memory.review_queue(uid)

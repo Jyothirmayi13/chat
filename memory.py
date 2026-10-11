@@ -212,18 +212,16 @@ def grade_review(uid: str, concept: str, remembered: bool) -> dict | None:
 
 def due_for_review(uid: str, k: int = 10) -> list[dict]:
     """Concepts whose spaced-repetition review window has passed."""
-    points, _ = qdrant_client.scroll(
-        VAULT,
-        scroll_filter=models.Filter(
-            must=[
-                models.FieldCondition(key="uid", match=models.MatchValue(value=uid)),
-                models.FieldCondition(key="next_review", range=models.Range(lte=int(time.time()))),
-            ]
-        ),
-        limit=k,
-        with_payload=True,
-    )
-    return [p.payload for p in points]
+    return [c for c in known_concepts(uid) if c.get("next_review", 0) <= time.time()][:k]
+
+
+def review_queue(uid: str, k: int = 10) -> list[dict]:
+    """Due concepts first, then the soonest upcoming ones, each with days_to_review."""
+    now = time.time()
+    items = sorted(known_concepts(uid), key=lambda c: c.get("next_review", 0))
+    for c in items:
+        c["days_to_review"] = round((c.get("next_review", now) - now) / 86400)
+    return items[:k]
 
 
 def forget(uid: str, concept: str) -> bool:

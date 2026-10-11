@@ -271,9 +271,7 @@ async function loadVault(mode) {
   const data = await res.json();
   const items = mode === "review" ? data.due : data.concepts;
   if (!items.length) {
-    list.innerHTML = mode === "review"
-      ? `<div class="empty">Nothing due. New concepts come back after 1 day, then 3, 7, 14, 30.</div>`
-      : `<div class="empty">Nothing here yet.</div>`;
+    list.innerHTML = `<div class="empty">Nothing here yet.</div>`;
     return;
   }
   if (mode === "review") {
@@ -303,7 +301,9 @@ const NEXT_DAYS = { 1: 1, 2: 3, 3: 7, 4: 14, 5: 30 };
 function reviewItem(c) {
   const el = document.createElement("div");
   el.className = "review";
+  const due = c.days_to_review <= 0;
   el.innerHTML = `
+    <span class="tag">${due ? "Due now" : `Next review in ${c.days_to_review} day(s)`}</span>
     <h3>${escapeHtml(c.concept)}</h3>
     <p>${escapeHtml(c.explanation || "Can you explain this in one sentence?")}</p>
     <div class="actions">

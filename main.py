@@ -275,7 +275,8 @@ def api_vault(uid: str = Query(DEFAULT_UID)):
 
 @app.get("/api/review")
 def api_review(uid: str = Query(DEFAULT_UID)):
-    return {"due": agents.review_digest(uid)}
+    return {"due": agents.review_digest(uid),
+            "due_now": len(memory.due_for_review(uid))}
 
 
 @app.post("/api/review/grade")
