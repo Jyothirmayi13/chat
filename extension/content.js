@@ -56,6 +56,12 @@ function mount() {
   document.body.appendChild(host);
 
   shadow = host.attachShadow({ mode: "open" });
+  // YouTube binds its player shortcuts on the document, so keys typed here
+  // would pause or seek the video. Stopping at the shadow boundary lets our
+  // own handlers run first and keeps the page from ever seeing them.
+  for (const type of ["keydown", "keyup", "keypress"]) {
+    shadow.addEventListener(type, (e) => e.stopPropagation());
+  }
   shadow.innerHTML = `
     <style>
       .btn{position:relative;width:46px;height:46px;border-radius:50%;border:0;cursor:pointer;
@@ -191,7 +197,9 @@ function bold(s) {
 
 // ── Caption reader: the video's own words, never a microphone ────
 const CAPTION_SELECTOR = ".ytp-caption-segment, .caption-window span";
-const FLUSH_WORDS = 45;   // ~15-20 s of lecture speech per memory chunk
+const FLUSH_WORDS = 22;    // ~8 s of lecture speech per memory chunk
+const FLUSH_SECONDS = 14;  // ...or send it after this long, so a slow speaker
+                           // can't leave a half chunk unsent for a minute
 let seenCues = new Set();
 let capWords = [];
 let capStart = 0;
@@ -239,7 +247,13 @@ function captureTick() {
     capStart = 0;
   }
   const v = document.querySelector("video");
-  if (!v || v.paused) return;
+  if (!v) return;
+  if (v.paused) {
+    // A pause is the student stopping to think — that's when they want the
+    // answer, so release whatever is buffered instead of holding it back.
+    if (capWords.length) sendCaptions();
+    return;
+  }
   let fresh = false;
   for (const text of cueTexts()) {
     const key = text.toLowerCase();
@@ -250,9 +264,11 @@ function captureTick() {
     capWords.push(text);
     fresh = true;
   }
-  if (!fresh) return;
-  setStatus(`Reading captions · ${formatTimestamp(capStart)}`);
-  if (capWords.join(" ").split(/\s+/).length >= FLUSH_WORDS) sendCaptions();
+  if (fresh) setStatus(`Reading captions · ${formatTimestamp(capStart)}`);
+  if (!capWords.length) return;
+  const words = capWords.join(" ").split(/\s+/).length;
+  const waiting = videoTime() - capStart;
+  if (words >= FLUSH_WORDS || (words >= 6 && waiting >= FLUSH_SECONDS)) sendCaptions();
 }
 
 async function sendCaptions() {
@@ -277,7 +293,7 @@ async function sendCaptions() {
 
 function startCapture() {
   if (capTimer) return;
-  capTimer = setInterval(captureTick, 800);
+  capTimer = setInterval(captureTick, 500);
 }
 
 function stopCapture() {
@@ -339,7 +355,7 @@ function start() {
   if (!document.body || getVideoId() === null) return;
   mount();
   poll();
-  setInterval(poll, 5000);
+  setInterval(poll, 2500);
 }
 
 if (document.readyState === "loading") {

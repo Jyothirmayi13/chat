@@ -19,6 +19,10 @@ import time
 import memory
 from lyzr_client import call_agent, describe
 
+# Each Tutor call is a round trip, so explaining every candidate in a fast
+# stream of small chunks would fall behind the lecture.
+MAX_CARDS_PER_CHUNK = 2
+
 
 def _fmt_context(chunks: list[dict]) -> str:
     return "\n".join(f"- {c.get('text', '')[:400]}" for c in chunks) or "none"
@@ -120,9 +124,12 @@ def detect_gaps(uid: str, transcript_text: str, video_id: str | None = None,
              and len(t.split()) <= 5]
     trace.append(f"{describe('gap')}: {len(terms)} candidate(s) in {secs}s "
                  f"→ {', '.join(terms[:3]) or 'none'}")
+    if len(terms) > MAX_CARDS_PER_CHUNK:
+        trace.append(f"Explaining the first {MAX_CARDS_PER_CHUNK} so cards keep "
+                     f"pace with playback")
 
     cards = []
-    for term in terms[:3]:
+    for term in terms[:MAX_CARDS_PER_CHUNK]:
         near, score = memory.closest_known(uid, term)
         if score >= memory.KNOWN_THRESHOLD:
             trace.append(f"Qdrant vault: skipped '{term}' — you know '{near}' ({score:.2f})")
