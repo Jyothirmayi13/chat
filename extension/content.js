@@ -231,8 +231,11 @@ function mount() {
     if (host && (e.target === host || host.contains(e.target))) return;
     hideChip();
   });
-  window.addEventListener("scroll", hideChip, true);
-  window.addEventListener("resize", hideChip);
+  // Hiding on scroll made the chip vanish mid-select on sites that auto-scroll
+  // or use sticky headers, so it follows the selection instead of disappearing.
+  const follow = () => requestAnimationFrame(reposition);
+  window.addEventListener("scroll", follow, true);
+  window.addEventListener("resize", follow);
 }
 
 function setStatus(msg) {
@@ -251,8 +254,8 @@ function bold(s) {
 }
 
 // ── Point-at-a-word lookup ───────────────────────────────────────
-const MAX_TERM = 120;      // a word or short phrase — longer selections are a
-                           // question, and the panel's Ask box is for those
+const MAX_TERM = 120;      // a word or phrase -> one Tutor call, saved to vault
+const MAX_PASSAGE = 700;   // longer selections are questions -> the Ask pipeline
 
 function hideChip() {
   if (chipEl) chipEl.classList.remove("on");
@@ -285,13 +288,19 @@ function onSelectionChange() {
   selTimer = setTimeout(checkSelection, 150);
 }
 
+function currentRect() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  return rect && (rect.width || rect.height || rect.top) ? rect : null;
+}
+
 function checkSelection() {
   const sel = window.getSelection();
-  const term = sel && sel.rangeCount
-    ? sel.toString().replace(/\s+/g, " ").trim() : "";
-  if (!term || term.length > MAX_TERM) return hideChip();
-  const rect = sel.getRangeAt(0).getBoundingClientRect();
-  if (!rect || (rect.width === 0 && rect.top === 0)) return hideChip();
+  const term = sel ? sel.toString().replace(/\s+/g, " ").trim() : "";
+  if (!term || term.length > MAX_PASSAGE) return hideChip();
+  const rect = currentRect();
+  if (!rect) return hideChip();
   const node = sel.anchorNode;
   const host = document.getElementById(HOST);
   if (host && node && host.contains(node.nodeType === Node.TEXT_NODE ? node.parentNode : node)) {
@@ -304,30 +313,62 @@ function checkSelection() {
   placeBelow(chipEl, rect);
 }
 
+function reposition() {
+  if (!chipEl) return;
+  const open = chipEl.classList.contains("on");
+  const shown = popEl && popEl.classList.contains("on");
+  if (!open && !shown) return;
+  const rect = currentRect();
+  if (!rect) {
+    hideChip();          // the selection is gone, so the chip has no anchor
+    return;
+  }
+  lastRect = rect;
+  if (open) placeBelow(chipEl, rect);
+  if (shown) placeBelow(popEl, rect);
+}
+
 function showPop(html) {
   popBody.innerHTML = html;
   popEl.classList.add("on");
   if (lastRect) placeBelow(popEl, lastRect);
 }
 
+function renderPop(title, body, steps) {
+  const lines = (steps || []).map((s) => `<li>${bold(escapeHtml(s))}</li>`).join("");
+  showPop(`<b>${escapeHtml(title)}</b>
+    <p>${escapeHtml(body || "Nothing came back — try again.")}</p>
+    ${lines ? `<details><summary>How this was made</summary><ol>${lines}</ol></details>` : ""}
+    <span class="vs">Open in the full app</span>`);
+}
+
+function heading(term) {
+  return term.length > 60 ? `${term.slice(0, 57)}…` : term;
+}
+
 async function sendLookup(term, passage) {
   hideChip();
-  showPop(`<b>${escapeHtml(term)}</b><p>Explaining…</p>`);
+  showPop(`<b>${escapeHtml(heading(term))}</b><p>Explaining…</p>`);
+  const path = term.length <= MAX_TERM ? "/api/lookup" : "/api/query";
+  const payload = term.length <= MAX_TERM
+    ? { term, passage, uid: "learner", video_id: getVideoId() }
+    : { query: `Explain this in plain language: "${term}"`, uid: "learner",
+        video_id: getVideoId(), timestamp: getCurrentTimestamp() };
   try {
-    const r = await fetch(`${backend}/api/lookup`, {
+    const r = await fetch(`${backend}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ term, passage, uid: "learner", video_id: getVideoId() }),
+      body: JSON.stringify(payload),
     });
     const data = await r.json();
-    const card = data.card || {};
-    const steps = (card.trace || []).map((s) => `<li>${escapeHtml(s)}</li>`).join("");
-    showPop(`<b>${escapeHtml(card.term || term)}</b>
-      <p>${escapeHtml(card.explanation || "Nothing came back — try again.")}</p>
-      ${steps ? `<details><summary>How this card was made</summary><ol>${steps}</ol></details>` : ""}
-      <span class="vs">Open in the full app</span>`);
+    if (path === "/api/lookup") {
+      const card = data.card || {};
+      renderPop(card.term || term, card.explanation, card.trace);
+    } else {
+      renderPop(heading(term), data.final_answer, data.logs);
+    }
   } catch {
-    showPop(`<b>${escapeHtml(term)}</b><p>Backend unreachable — try again.</p>`);
+    showPop(`<b>${escapeHtml(heading(term))}</b><p>Backend unreachable — try again.</p>`);
   }
 }
 
