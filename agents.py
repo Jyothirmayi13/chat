@@ -62,7 +62,8 @@ def run_workflow(query: str, uid: str, video_id: str | None = None,
         f"CONCEPTS THE LEARNER ALREADY KNOWS:\n{', '.join(known[:40]) or 'none'}\n\n"
         f"QUESTION: {query}\n\n"
         "Explain in max 3 short sentences. When possible, anchor new ideas to "
-        "concepts from the learner's known list. No preamble."
+        "concepts from the learner's known list, and never imply the learner "
+        "knows anything not on that list. No preamble."
     )
     answer, secs = _timed("tutor", uid, message)
     logs.append(f"🧠 **{describe('tutor')}:** answered in {secs}s")
@@ -132,7 +133,9 @@ def detect_gaps(uid: str, transcript_text: str, video_id: str | None = None,
             f"LEARNER KNOWS:\n{', '.join(known[:40]) or 'none'}\n\n"
             f"TERM: {term}\n\n"
             "Give a 2-sentence plain explanation a course learner can use "
-            "immediately. First sentence = what it is, second = why it matters here."
+            "immediately. First sentence = what it is, second = why it matters here. "
+            "If you compare it to something, only name a concept listed under "
+            "LEARNER KNOWS — never imply the learner knows anything not listed there."
         )
         explanation, tsecs = _timed("tutor", uid, explain_message)
         anchor = f"anchored to {len(known)} known concept(s)" if known else "vault empty, no anchors yet"
