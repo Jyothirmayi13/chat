@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AI Learning Copilot",
-  "version": "1.0.0",
-  "description": "Your floating AI agent for learning from YouTube videos.",
+  "version": "1.1.0",
+  "description": "Your floating AI coach for anything you read in the browser.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -20,7 +20,12 @@
   "content_scripts": [
     {
       "matches": [
-        "https://*.youtube.com/watch*"
+        "http://*/*",
+        "https://*/*"
+      ],
+      "exclude_matches": [
+        "http://localhost:8000/*",
+        "https://learnloop-xh10.onrender.com/*"
       ],
       "js": [
         "content.js"

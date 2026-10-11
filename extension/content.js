@@ -1,12 +1,14 @@
 /**
- * content.js — the floating coach on YouTube watch pages.
+ * content.js — the floating coach, on every page you read.
  *
- * Three jobs:
- *  1. Read the video's own caption cues while it plays, so the words arrive
- *     correctly spelled and in step with playback — no microphone involved.
- *  2. Expose video id + playback time to popup.js (grounding context).
- *  3. Show a corner bubble that quietly collects proactive cards, so clearing
- *     a doubt never means leaving the video or losing your place.
+ * Four jobs:
+ *  1. Point-at-a-word: select a term anywhere (paper, docs, blog, video page)
+ *     and a chip offers an explanation in place, without leaving the page.
+ *  2. On a YouTube watch page, read the video's own caption cues while it
+ *     plays, so words arrive correctly spelled and in step with playback.
+ *  3. Expose video id + playback time to popup.js (grounding context).
+ *  4. Show a corner bubble that quietly collects proactive cards, so clearing
+ *     a doubt never means losing your place.
  */
 
 const HOST = "learnloop-coach";
@@ -17,6 +19,13 @@ let badge = null;
 let statusEl = null;
 let coachOn = false;
 const queue = [];
+let chipEl = null;
+let popEl = null;
+let popBody = null;
+let pendingTerm = "";
+let pendingPassage = "";
+let lastRect = null;
+let selTimer = null;
 
 chrome.storage.sync.get({ backend_url: backend }, (v) => {
   backend = v.backend_url;
@@ -101,15 +110,34 @@ function mount() {
       .ans summary{font-size:11px;color:#8b98ad;cursor:pointer}
       .ans ol{margin:4px 0 0;padding-left:16px;font-size:11px;color:#8b98ad;line-height:1.5}
       .ans .at{margin:0;color:#e6edf3}
+      .chip{position:fixed;display:none;align-items:center;gap:5px;background:#0b1020;
+        border:1px solid #5eead466;border-radius:9px;padding:6px 10px;font-size:12px;
+        font-weight:700;color:#5eead4;cursor:pointer;box-shadow:0 6px 20px #000c;
+        font-family:system-ui,sans-serif;z-index:2}
+      .chip.on{display:flex}
+      .pop{position:fixed;display:none;width:min(340px,86vw);max-height:46vh;overflow:auto;
+        background:#0b1020;color:#e6edf3;border:1px solid #ffffff26;border-radius:12px;
+        padding:11px 12px;font-size:13px;line-height:1.5;font-family:system-ui,sans-serif;
+        box-shadow:0 10px 30px #000c;z-index:3}
+      .pop.on{display:block}
+      .pop b{display:block;color:#7dd3fc;font-size:14px;margin:0 0 5px;padding-right:16px}
+      .pop p{margin:0 0 7px}
+      .pop details{margin:0 0 7px}
+      .pop summary{font-size:11px;color:#8b98ad;cursor:pointer}
+      .pop ol{margin:5px 0 0;padding-left:17px;font-size:11px;color:#8b98ad;line-height:1.5}
+      .pop .vs{font-size:11px;color:#7dd3fc;cursor:pointer;text-decoration:underline}
+      .pc{position:absolute;top:6px;right:9px;font-size:16px;color:#8b98ad;cursor:pointer}
     </style>
     <button class="btn off" title="LearnLoop coach">🧠<span class="n"></span></button>
     <div class="p">
       <div class="hd"><p class="h">Proactive · you didn't ask</p><span class="x" title="Open the full LearnLoop app">full app ↗</span></div>
       <p class="s"></p>
       <div class="l"><div class="e">No cards yet.</div></div>
-      <div class="q"><input type="text" placeholder="Ask about anything in this video" /><button>Ask</button></div>
+      <div class="q"><input type="text" placeholder="Ask about this page" /><button>Ask</button></div>
       <div class="ans"></div>
-    </div>`;
+    </div>
+    <div class="chip">💡 Explain in LearnLoop</div>
+    <div class="pop"><span class="pc" title="Close">×</span><div class="bd"></div></div>`;
 
   panel = shadow.querySelector(".p");
   badge = shadow.querySelector(".n");
@@ -134,9 +162,13 @@ function mount() {
     coachOn = want;
     btn.classList.toggle("off", !want);
     if (want) {
-      ensureCaptionsOn();
-      startCapture();
-      setStatus("Reading the video's captions…");
+      if (getVideoId() !== null) {
+        ensureCaptionsOn();
+        startCapture();
+        setStatus("Reading the video's captions…");
+      } else {
+        setStatus("Coach on — select any word here for a card");
+      }
     } else {
       stopCapture();
       setStatus("Coach off — nothing is read");
@@ -178,6 +210,29 @@ function mount() {
   askInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") ask();
   });
+
+  // Selection chip: the page's own text, read at the moment the learner points
+  // at it. Needs no coach switch — selecting a word is already the asking.
+  chipEl = shadow.querySelector(".chip");
+  popEl = shadow.querySelector(".pop");
+  popBody = shadow.querySelector(".pop .bd");
+  shadow.querySelector(".pc").addEventListener("click", hidePop);
+  chipEl.addEventListener("click", () => {
+    if (pendingTerm) sendLookup(pendingTerm, pendingPassage);
+  });
+  popEl.addEventListener("click", (e) => {
+    if (e.target.classList && e.target.classList.contains("vs")) {
+      window.open(`${backend}/?as=learner`, "_blank", "noopener");
+    }
+  });
+  document.addEventListener("selectionchange", onSelectionChange);
+  document.addEventListener("mousedown", (e) => {
+    const host = document.getElementById(HOST);
+    if (host && (e.target === host || host.contains(e.target))) return;
+    hideChip();
+  });
+  window.addEventListener("scroll", hideChip, true);
+  window.addEventListener("resize", hideChip);
 }
 
 function setStatus(msg) {
@@ -193,6 +248,87 @@ function escapeHtml(s) {
 // transform can add markup.
 function bold(s) {
   return s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+}
+
+// ── Point-at-a-word lookup ───────────────────────────────────────
+const MAX_TERM = 120;      // a word or short phrase — longer selections are a
+                           // question, and the panel's Ask box is for those
+
+function hideChip() {
+  if (chipEl) chipEl.classList.remove("on");
+}
+
+function hidePop() {
+  if (popEl) popEl.classList.remove("on");
+}
+
+function placeBelow(el, rect) {
+  el.style.left = `${Math.max(8, Math.min(window.innerWidth - el.offsetWidth - 8, rect.left))}px`;
+  el.style.top = `${Math.min(Math.max(8, rect.bottom + 8),
+                             Math.max(8, window.innerHeight - el.offsetHeight - 8))}px`;
+}
+
+function passageAround(node) {
+  let el = node && (node.nodeType === Node.TEXT_NODE ? node.parentNode : node);
+  let best = "";
+  for (let depth = 0; el && depth < 6; depth++, el = el.parentElement) {
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (text.length > 900) break;        // climbed past the paragraph
+    best = text;
+    if (text.length >= 80) break;        // a sentence or two is enough to ground it
+  }
+  return best;
+}
+
+function onSelectionChange() {
+  clearTimeout(selTimer);
+  selTimer = setTimeout(checkSelection, 150);
+}
+
+function checkSelection() {
+  const sel = window.getSelection();
+  const term = sel && sel.rangeCount
+    ? sel.toString().replace(/\s+/g, " ").trim() : "";
+  if (!term || term.length > MAX_TERM) return hideChip();
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  if (!rect || (rect.width === 0 && rect.top === 0)) return hideChip();
+  const node = sel.anchorNode;
+  const host = document.getElementById(HOST);
+  if (host && node && host.contains(node.nodeType === Node.TEXT_NODE ? node.parentNode : node)) {
+    return hideChip();
+  }
+  pendingTerm = term;
+  pendingPassage = passageAround(node);
+  lastRect = rect;
+  chipEl.classList.add("on");
+  placeBelow(chipEl, rect);
+}
+
+function showPop(html) {
+  popBody.innerHTML = html;
+  popEl.classList.add("on");
+  if (lastRect) placeBelow(popEl, lastRect);
+}
+
+async function sendLookup(term, passage) {
+  hideChip();
+  showPop(`<b>${escapeHtml(term)}</b><p>Explaining…</p>`);
+  try {
+    const r = await fetch(`${backend}/api/lookup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ term, passage, uid: "learner", video_id: getVideoId() }),
+    });
+    const data = await r.json();
+    const card = data.card || {};
+    const steps = (card.trace || []).map((s) => `<li>${escapeHtml(s)}</li>`).join("");
+    showPop(`<b>${escapeHtml(card.term || term)}</b>
+      <p>${escapeHtml(card.explanation || "Nothing came back — try again.")}</p>
+      ${steps ? `<details><summary>How this card was made</summary><ol>${steps}</ol></details>` : ""}
+      <span class="vs">Open in the full app</span>`);
+  } catch {
+    showPop(`<b>${escapeHtml(term)}</b><p>Backend unreachable — try again.</p>`);
+  }
 }
 
 // ── Caption reader: the video's own words, never a microphone ────
@@ -355,7 +491,7 @@ async function poll() {
 }
 
 function start() {
-  if (!document.body || getVideoId() === null) return;
+  if (!document.body) return;
   mount();
   poll();
   setInterval(poll, 2500);

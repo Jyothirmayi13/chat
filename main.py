@@ -70,6 +70,14 @@ class IngestRequest(BaseModel):
     uid: str | None = None
 
 
+class LookupRequest(BaseModel):
+    term: str
+    passage: str = ""
+    uid: str | None = None
+    source: str = "text-selection"
+    video_id: str | None = None
+
+
 def _surface_gaps(uid: str, text: str, video_id: str | None,
                   trace: list[str] | None = None, notify_uid: str | None = None):
     """Run gap detection and queue new cards (runs off the request thread)."""
@@ -266,6 +274,29 @@ def api_query(req: QueryRequest):
     """Reactive ask: full multi-agent pipeline with observable logs."""
     uid = req.uid or DEFAULT_UID
     return agents.run_workflow(req.query, uid, req.video_id, req.timestamp)
+
+
+@app.post("/api/lookup")
+def api_lookup(req: LookupRequest):
+    """Point-at-a-word: explain the term the learner selected.
+
+    Needs no coach switch — selecting text is already the learner asking.
+    """
+    uid = req.uid or DEFAULT_UID
+    term = " ".join(req.term.split())[:120]
+    passage = req.passage.strip()
+    if not term or _blocked(term) or _blocked(passage):
+        return {"status": "blocked"}
+    if passage:
+        memory.remember_context(uid, passage[:2000], source=req.source,
+                                video_id=req.video_id)
+    try:
+        card = agents.explain_term(uid, term, passage, [])
+    except Exception as e:
+        print(f"[lookup] failed: {e}")
+        return {"status": "error", "error": str(e)[:200]}
+    print(f"[lookup] {uid}: '{term}' explained and saved")
+    return {"status": "ok", "card": card}
 
 
 @app.post("/api/acknowledge")

@@ -162,6 +162,52 @@ def detect_gaps(uid: str, transcript_text: str, video_id: str | None = None,
     return cards
 
 
+# ── Explicit lookup (learner selected a word themselves) ────────
+def explain_term(uid: str, term: str, passage: str = "",
+                 trace: list[str] | None = None) -> dict:
+    """Explain the one term the learner pointed at, in the passage they read it in.
+
+    One Tutor round trip and no gap detector: the learner already told us what
+    they don't know, so second-guessing them would just add latency.
+    """
+    trace = list(trace or [])
+    known = [c["concept"] for c in memory.known_concepts(uid)]
+    passage = " ".join(passage.split())[:1200]
+    chunks = memory.recall_context(uid, term, k=3)
+    near, score = memory.closest_known(uid, term)
+    if score >= memory.KNOWN_THRESHOLD:
+        trace.append(f"Qdrant knowledge_vault: you already have '{near}' "
+                     f"({score:.2f}) — explained again because you asked")
+    else:
+        trace.append(f"Qdrant knowledge_vault: '{term}' is new to you "
+                     f"({len(known)} concept(s) checked, closest "
+                     f"'{near or 'nothing'}' at {score:.2f})")
+    trace.append(f"Qdrant lecture_context: {len(chunks)} stored snippet(s) recalled")
+    if passage:
+        trace.append(f"{len(passage.split())} word(s) of the passage you selected kept as context")
+
+    message = (
+        f"TERM TO EXPLAIN: {term}\n\n"
+        f"WHERE THE LEARNER HIT IT:\n{passage or _fmt_context(chunks)}\n\n"
+        f"LEARNER KNOWS:\n{', '.join(known[:40]) or 'none'}\n\n"
+        "Give 2-3 plain sentences: first what this term means, then how it is "
+        "being used in the passage above. No preamble, no headings. Only compare "
+        "it to a concept listed under LEARNER KNOWS, and never imply the learner "
+        "knows anything not listed there."
+    )
+    explanation, secs = _timed("tutor", uid, message)
+    trace.append(f"{describe('tutor')}: explained in {secs}s")
+    mastery = memory.store_concept(uid, term, explanation)
+    trace.append("Qdrant knowledge_vault: saved — it now counts as known and is "
+                 f"scheduled for review (level {mastery})")
+    return {
+        "term": term,
+        "explanation": explanation,
+        "grounded_in": [passage] if passage else [c.get("text", "")[:160] for c in chunks],
+        "trace": trace,
+    }
+
+
 # ── Review scheduling ───────────────────────────────────────────
 def review_digest(uid: str) -> list[dict]:
     """Due concepts first, then the soonest upcoming ones — feeds the review view."""
