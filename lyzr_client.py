@@ -27,6 +27,16 @@ _ROLE_AGENTS = {
     "tutor": LYZR_TUTOR_AGENT_ID or LYZR_AGENT_ID,
     "vault": LYZR_VAULT_AGENT_ID or LYZR_AGENT_ID,
 }
+_ROLE_NAMES = {"manager": "Manager", "gap": "Gap Detector", "tutor": "Tutor", "vault": "Librarian"}
+
+
+def describe(role: str) -> str:
+    """Name the Lyzr agent that will actually serve a role, for honest logs."""
+    agent_id = _ROLE_AGENTS.get(role) or LYZR_AGENT_ID
+    name = _ROLE_NAMES.get(role, role)
+    if role != "manager" and agent_id == LYZR_AGENT_ID:
+        name += " (via Manager)"
+    return f"Lyzr {name} agent …{(agent_id or '????')[-4:]}"
 
 
 def call_agent(role: str, user_id: str, message: str, session_id: str | None = None) -> str:

@@ -27,6 +27,10 @@ from config import (
 LECTURE = "lecture_context"
 VAULT = "knowledge_vault"
 
+KNOWN_THRESHOLD = 0.78
+# Leitner boxes: days until the next review at each mastery level.
+REVIEW_DAYS = {1: 1, 2: 3, 3: 7, 4: 14, 5: 30}
+
 _embedder = TextEmbedding(EMBED_MODEL)
 
 
@@ -108,21 +112,6 @@ def recall_context(uid: str, query: str, k: int = 4, video_id: str | None = None
     return [h.payload for h in hits]
 
 
-def recent_context(uid: str, k: int = 6) -> list[dict]:
-    """Most recent transcript chunks (for the proactive watcher)."""
-    points, _ = qdrant_client.scroll(
-        LECTURE,
-        scroll_filter=models.Filter(
-            must=[models.FieldCondition(key="uid", match=models.MatchValue(value=uid))]
-        ),
-        limit=k,
-        with_payload=True,
-    )
-    return sorted(
-        [p.payload for p in points], key=lambda p: p.get("ts", 0), reverse=True
-    )
-
-
 # ── Knowledge vault ─────────────────────────────────────────────
 def known_concepts(uid: str, limit: int = 500) -> list[dict]:
     """All concepts the learner has stored, with mastery + review metadata."""
@@ -137,8 +126,8 @@ def known_concepts(uid: str, limit: int = 500) -> list[dict]:
     return [p.payload for p in points]
 
 
-def knows_semantically(uid: str, term: str, threshold: float = 0.78) -> bool:
-    """True if a term is already in the vault (semantic, not exact string)."""
+def closest_known(uid: str, term: str) -> tuple[str | None, float]:
+    """Nearest concept already in the learner's vault, with its cosine score."""
     hits = qdrant_client.query_points(
         VAULT,
         query=embed(term),
@@ -147,11 +136,23 @@ def knows_semantically(uid: str, term: str, threshold: float = 0.78) -> bool:
         ),
         limit=1,
     ).points
-    return bool(hits) and hits[0].score >= threshold
+    if not hits:
+        return None, 0.0
+    return hits[0].payload.get("concept"), hits[0].score
 
 
-def store_concept(uid: str, concept: str, explanation: str, mastery: int = 1):
-    """Save or refresh a learned concept in the vault."""
+def knows_semantically(uid: str, term: str, threshold: float = KNOWN_THRESHOLD) -> bool:
+    """True if a term is already in the vault (semantic, not exact string)."""
+    return closest_known(uid, term)[1] >= threshold
+
+
+def _due_after(mastery: int) -> int:
+    return int(time.time()) + REVIEW_DAYS[max(1, min(5, mastery))] * 86400
+
+
+def store_concept(uid: str, concept: str, explanation: str, mastery: int = 1) -> int:
+    """Save or refresh a learned concept in the vault; returns the new mastery level."""
+    concept = concept.strip().lower()
     existing = qdrant_client.query_points(
         VAULT,
         query=embed(concept),
@@ -163,7 +164,8 @@ def store_concept(uid: str, concept: str, explanation: str, mastery: int = 1):
     if existing and existing[0].score >= 0.82:
         pid = existing[0].id
         prev = existing[0].payload.get("mastery", 0)
-        mastery = min(5, prev + 1)
+        mastery = min(5, max(mastery, prev + 1))
+        explanation = explanation or existing[0].payload.get("explanation", "")
     else:
         pid = str(uuid.uuid4())
 
@@ -179,11 +181,33 @@ def store_concept(uid: str, concept: str, explanation: str, mastery: int = 1):
                     "explanation": explanation,
                     "mastery": mastery,
                     "learned_ts": int(time.time()),
-                    "next_review": int(time.time()) + 86400,
+                    "next_review": _due_after(mastery),
                 },
             )
         ],
     )
+    return mastery
+
+
+def grade_review(uid: str, concept: str, remembered: bool) -> dict | None:
+    """Leitner step: remembered pushes the next review further out, forgot resets it."""
+    concept = concept.strip().lower()
+    points, _ = qdrant_client.scroll(
+        VAULT,
+        scroll_filter=models.Filter(must=[
+            models.FieldCondition(key="uid", match=models.MatchValue(value=uid)),
+            models.FieldCondition(key="concept", match=models.MatchValue(value=concept)),
+        ]),
+        limit=1,
+        with_payload=True,
+    )
+    if not points:
+        return None
+    p = points[0]
+    mastery = min(5, p.payload.get("mastery", 1) + 1) if remembered else 1
+    update = {"mastery": mastery, "next_review": _due_after(mastery)}
+    qdrant_client.set_payload(VAULT, payload=update, points=[p.id])
+    return {"concept": concept, **update}
 
 
 def due_for_review(uid: str, k: int = 10) -> list[dict]:

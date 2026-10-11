@@ -37,8 +37,8 @@ def chunk_transcript(entries: list[dict], chunk_sec: int = CHUNK_DURATION) -> li
     return chunks
 
 
-def ingest_video(video_id: str, uid: str) -> int:
-    """Fetch + chunk + embed + store. Returns number of chunks ingested."""
+def ingest_video(video_id: str, uid: str) -> list[dict]:
+    """Fetch + chunk + embed + store. Returns the stored chunks in lecture order."""
     try:
         fetched = YouTubeTranscriptApi().fetch(video_id)
         entries = [
@@ -46,8 +46,10 @@ def ingest_video(video_id: str, uid: str) -> int:
             for s in fetched.snippets
         ]
     except Exception as e:
+        # YouTube refuses most cloud-provider IPs, so this fails on hosted
+        # deploys; run `python ingest.py <id>` from a home connection instead.
         print(f"[ingest] transcript unavailable for {video_id}: {e}")
-        return 0
+        return []
 
     chunks = chunk_transcript(entries)
     for c in chunks:
@@ -56,12 +58,13 @@ def ingest_video(video_id: str, uid: str) -> int:
             start_time=c["start_time"], end_time=c["end_time"],
         )
     print(f"[ingest] stored {len(chunks)} chunks for {video_id}")
-    return len(chunks)
+    return chunks
 
 
 if __name__ == "__main__":
     import sys
     memory.init_db()
     vid = sys.argv[1] if len(sys.argv) > 1 else "aircAruvnKk"
-    n = ingest_video(vid, "learner")
-    print(f"[DONE] {n} chunks ingested.")
+    who = sys.argv[2] if len(sys.argv) > 2 else "learner"
+    n = len(ingest_video(vid, who))
+    print(f"[DONE] {n} chunks ingested for {who}.")

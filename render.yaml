@@ -14,6 +14,14 @@ services:
         sync: false
       - key: LYZR_AGENT_ID
         sync: false
+      - key: LYZR_GAP_AGENT_ID
+        value: 6acb298f3ab69773f6536ba2
+      - key: LYZR_TUTOR_AGENT_ID
+        value: 6acb299135a2bbbac9f09581
+      - key: OMI_APP_ID
+        sync: false
+      - key: OMI_APP_SECRET
+        sync: false
       - key: QDRANT_URL
         sync: false
       - key: QDRANT_API_KEY

@@ -1,24 +1,33 @@
 """
 agents.py — Lyzr multi-agent orchestration over shared Qdrant memory.
 
-Manager-driven pipeline with observable, step-by-step logs:
+The backend is the orchestrator; each reasoning step is a separate,
+specialised Lyzr agent with its own system prompt:
 
-  Reactive:  Router -> Retriever (Qdrant) -> Tutor (Lyzr, personalized) -> Librarian
-  Proactive: Watcher -> Gap Detector (Lyzr) -> Tutor (Lyzr) -> pending cards
+  Reactive:  Qdrant recall -> Lyzr Tutor (personalised) -> Qdrant vault write
+  Proactive: Qdrant store -> Lyzr Gap Detector -> Qdrant vault check
+             -> Lyzr Tutor -> pending card
 
-Agents share the same Qdrant collections, which is what makes the whole
-system one connected memory loop instead of isolated chat calls.
+Every step is logged so the workflow is observable end to end, and the logs
+name the agent that actually served the step.
 """
 
 import json
 import re
+import time
 
 import memory
-from lyzr_client import call_agent
+from lyzr_client import call_agent, describe
 
 
 def _fmt_context(chunks: list[dict]) -> str:
     return "\n".join(f"- {c.get('text', '')[:400]}" for c in chunks) or "none"
+
+
+def _timed(role: str, uid: str, message: str) -> tuple[str, float]:
+    t = time.time()
+    reply = call_agent(role, uid, message)
+    return reply, round(time.time() - t, 1)
 
 
 def _extract_json_array(text: str) -> list:
@@ -39,21 +48,15 @@ def run_workflow(query: str, uid: str, video_id: str | None = None,
                  timestamp: str | None = None) -> dict:
     logs = []
 
-    logs.append(f"🧭 **Manager:** Routing query for learner `{uid}`...")
-    logs.append(
-        "🧭 **Router:** "
-        + ("Lecture-grounded (video context found)"
-           if video_id else "Open-world (no lecture context)")
-    )
+    scope = f"lecture {video_id}" if video_id else "all your lectures"
+    logs.append(f"🧭 **Orchestrator:** question from `{uid}`, scope = {scope}")
 
-    logs.append("🔍 **Retriever Agent:** Semantic search over lecture memory...")
     chunks = memory.recall_context(uid, query, k=4, video_id=video_id)
-    logs.append(f"✅ Retriever → {len(chunks)} grounded chunk(s).")
+    logs.append(f"🔍 **Qdrant** `lecture_context` (uid filter): {len(chunks)} grounded chunk(s)")
 
     known = [c["concept"] for c in memory.known_concepts(uid)]
-    logs.append(f"📚 **Librarian (read):** {len(known)} known concepts as anchor vocabulary.")
+    logs.append(f"📚 **Qdrant** `knowledge_vault`: {len(known)} known concept(s) as anchors")
 
-    logs.append("🧠 **Tutor Agent:** Generating personalized explanation via Lyzr...")
     message = (
         f"CONTEXT (transcript snippets):\n{_fmt_context(chunks)}\n\n"
         f"CONCEPTS THE LEARNER ALREADY KNOWS:\n{', '.join(known[:40]) or 'none'}\n\n"
@@ -61,14 +64,14 @@ def run_workflow(query: str, uid: str, video_id: str | None = None,
         "Explain in max 3 short sentences. When possible, anchor new ideas to "
         "concepts from the learner's known list. No preamble."
     )
-    answer = call_agent("tutor", uid, message)
-    logs.append("✅ Tutor done → explanation ready.")
+    answer, secs = _timed("tutor", uid, message)
+    logs.append(f"🧠 **{describe('tutor')}:** answered in {secs}s")
 
-    logs.append("💾 **Librarian Agent:** Saving concept to knowledge vault...")
     concept = _extract_term(query)
     if concept:
-        memory.store_concept(uid, concept, answer, mastery=2)
-        logs.append(f"✅ Saved '{concept}' to vault.")
+        level = memory.store_concept(uid, concept, answer, mastery=2)
+        logs.append(f"💾 **Qdrant** `knowledge_vault`: saved '{concept}' "
+                    f"(level {level}, review in {memory.REVIEW_DAYS[level]} days)")
 
     return {"logs": logs, "final_answer": answer, "context": chunks}
 
@@ -87,9 +90,15 @@ def _extract_term(query: str) -> str | None:
 
 
 # ── Proactive pipeline (detect gaps in fresh lecture speech) ────
-def detect_gaps(uid: str, transcript_text: str, video_id: str | None = None) -> list[dict]:
-    """Find terms this learner likely won't know and explain them before asked."""
+def detect_gaps(uid: str, transcript_text: str, video_id: str | None = None,
+                trace: list[str] | None = None) -> list[dict]:
+    """Find terms this learner likely won't know and explain them before asked.
+
+    Each returned card carries the full step trace that produced it.
+    """
+    trace = list(trace or [])
     known = [c["concept"] for c in memory.known_concepts(uid)]
+    trace.append(f"Qdrant knowledge_vault: {len(known)} concept(s) you already know")
 
     gap_message = (
         f"LECTURE TRANSCRIPT:\n{transcript_text[:1500]}\n\n"
@@ -103,16 +112,20 @@ def detect_gaps(uid: str, transcript_text: str, video_id: str | None = None) -> 
         "people, libraries, specific mechanisms. "
         "Respond ONLY with a JSON array of term strings, e.g. [\"term1\", \"term2\"]."
     )
-    raw = call_agent("gap", uid, gap_message)
+    raw, secs = _timed("gap", uid, gap_message)
     print(f"[gap-detector] raw Lyzr reply: {raw[:300]}")
     terms = _extract_json_array(raw)
     terms = [t for t in terms if isinstance(t, str) and 1 < len(t) <= 60
              and len(t.split()) <= 5]
+    trace.append(f"{describe('gap')}: {len(terms)} candidate(s) in {secs}s "
+                 f"→ {', '.join(terms[:3]) or 'none'}")
 
     cards = []
     for term in terms[:3]:
-        if memory.knows_semantically(uid, term):
-            continue  # already in vault — not a gap
+        near, score = memory.closest_known(uid, term)
+        if score >= memory.KNOWN_THRESHOLD:
+            trace.append(f"Qdrant vault: skipped '{term}' — you know '{near}' ({score:.2f})")
+            continue
         chunks = memory.recall_context(uid, term, k=2, video_id=video_id)
         explain_message = (
             f"CONTEXT (transcript):\n{_fmt_context(chunks)}\n\n"
@@ -121,11 +134,19 @@ def detect_gaps(uid: str, transcript_text: str, video_id: str | None = None) -> 
             "Give a 2-sentence plain explanation a course learner can use "
             "immediately. First sentence = what it is, second = why it matters here."
         )
-        explanation = call_agent("tutor", uid, explain_message)
+        explanation, tsecs = _timed("tutor", uid, explain_message)
+        anchor = f"anchored to {len(known)} known concept(s)" if known else "vault empty, no anchors yet"
+        steps = trace + [
+            f"Qdrant vault: '{term}' is new to you "
+            f"(closest: {near or 'nothing'}, {score:.2f} < {memory.KNOWN_THRESHOLD})",
+            f"Qdrant lecture_context: {len(chunks)} snippet(s) to ground it",
+            f"{describe('tutor')}: explained in {tsecs}s, {anchor}",
+        ]
         cards.append({
             "term": term,
             "explanation": explanation,
             "grounded_in": [c.get("text", "")[:160] for c in chunks],
+            "trace": steps,
         })
     print(f"[gap-detector] {len(terms)} candidate term(s) -> {len(cards)} card(s) built")
     return cards
