@@ -26,6 +26,7 @@ let pendingTerm = "";
 let pendingPassage = "";
 let lastRect = null;
 let selTimer = null;
+let chipHover = false;
 
 chrome.storage.sync.get({ backend_url: backend }, (v) => {
   backend = v.backend_url;
@@ -217,9 +218,22 @@ function mount() {
   popEl = shadow.querySelector(".pop");
   popBody = shadow.querySelector(".pop .bd");
   shadow.querySelector(".pc").addEventListener("click", hidePop);
-  chipEl.addEventListener("click", () => {
-    if (pendingTerm) sendLookup(pendingTerm, pendingPassage);
-  });
+  // Pressing the chip must not clear the page's selection: the default action
+  // of mousedown collapses it, selectionchange then hides the chip, and the
+  // click lands on the page underneath instead of here. preventDefault keeps
+  // both the selection and the click alive.
+  let lastSend = 0;
+  const fire = (e) => {
+    e.preventDefault();
+    if (e.type === "click" && Date.now() - lastSend < 600) return;
+    if (!pendingTerm) return;
+    lastSend = Date.now();
+    sendLookup(pendingTerm, pendingPassage);
+  };
+  chipEl.addEventListener("mousedown", fire);
+  chipEl.addEventListener("click", fire);
+  chipEl.addEventListener("mouseenter", () => { chipHover = true; });
+  chipEl.addEventListener("mouseleave", () => { chipHover = false; });
   popEl.addEventListener("click", (e) => {
     if (e.target.classList && e.target.classList.contains("vs")) {
       window.open(`${backend}/?as=learner`, "_blank", "noopener");
@@ -296,6 +310,7 @@ function currentRect() {
 }
 
 function checkSelection() {
+  if (chipHover) return;            // never pull the chip out from under the cursor
   const sel = window.getSelection();
   const term = sel ? sel.toString().replace(/\s+/g, " ").trim() : "";
   if (!term || term.length > MAX_PASSAGE) return hideChip();
@@ -314,7 +329,7 @@ function checkSelection() {
 }
 
 function reposition() {
-  if (!chipEl) return;
+  if (!chipEl || chipHover) return;
   const open = chipEl.classList.contains("on");
   const shown = popEl && popEl.classList.contains("on");
   if (!open && !shown) return;
