@@ -338,6 +338,9 @@ function render() {
 
 // ── Card feed ────────────────────────────────────────────────────
 async function poll() {
+  // The queue is one-per-uid and first-poller-wins, so a closed bubble that
+  // keeps draining it would starve the PWA (and vice versa).
+  if (!coachOn) return;
   try {
     const r = await fetch(`${backend}/api/proactive?uid=learner`);
     const data = await r.json();

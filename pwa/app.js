@@ -215,6 +215,9 @@ function escapeHtml(s) {
 }
 
 async function pollProactive() {
+  // Cards are queued one-per-uid and the first poller drains them, so a PWA
+  // with the coach off must not steal another surface's cards.
+  if (!coachOn) return;
   try {
     const res = await fetch(`${API}/api/proactive?uid=${uid}`);
     const data = await res.json();
