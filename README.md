@@ -1,7 +1,36 @@
 # LearnLoop — Your Proactive Voice-first Learning Copilot
 
-**Build track:** Meeting & Lecture Intelligence (Open Innovation eligible)
+**Build track:** Meeting & Lecture Intelligence
 **Stack:** Omi (voice) · Qdrant (semantic memory) · Lyzr (multi-agent reasoning) — one connected loop.
+
+**Live demo:** https://learnloop-xh10.onrender.com  (free tier: the first load after idle can take ~30-60 s to wake)
+**Demo video:** <ADD YOUTUBE/LOOM LINK HERE>
+**License:** MIT
+
+## How Omi, Qdrant and Lyzr are used (at a glance)
+
+| Tool | Role in the loop | Where in code |
+|---|---|---|
+| **Omi** | Real-time voice input. The real-time transcript and conversation webhooks feed the backend; new cards are pushed back to the phone through Omi's notification API | `main.py` (`/omi/realtime`, `/omi/conversation`, `_notify_omi`) |
+| **Qdrant** | Persistent semantic memory on Qdrant Cloud: `lecture_context` (what was said) and `knowledge_vault` (what you know, mastery, next review). Per-learner filters, a similarity check decides what you already know, and forget deletes points | `memory.py`, `config.py` |
+| **Lyzr** | Agent reasoning: a Gap Detector agent finds terms you likely don't know, and a Tutor agent explains them anchored to your vault. A general Lyzr agent is the fallback for unset roles | `agents.py`, `lyzr_client.py` |
+
+### Architecture diagram
+
+```mermaid
+flowchart LR
+    A[Omi app<br/>voice] -->|real-time + conversation webhooks| B
+    M[PWA mic / extension] -->|/api/transcript| B
+    B[FastAPI backend<br/>orchestrator] -->|embed + store chunk| Q[(Qdrant<br/>lecture_context<br/>knowledge_vault)]
+    B -->|transcript + known concepts| G[Lyzr Gap Detector]
+    G -->|candidate terms| B
+    B -->|vault similarity check| Q
+    B -->|snippets + known concepts| T[Lyzr Tutor]
+    T -->|explanation| B
+    B -->|card + step trace| P[PWA]
+    B -->|notification| A
+    P -->|got it / forget / review| B
+```
 
 ## The problem
 Watching an online course and hitting a technical term means pausing, leaving the tab,
@@ -184,4 +213,7 @@ and no external keys (Lyzr calls return a clear stub when unset). The Omi leg is
 live from the Omi phone app with **no wearable hardware**.
 
 ## Submit
-Public repo · deployed PWA URL · ≤5-min demo video · track named here · no committed keys.
+Public repo · deployed PWA URL · demo video · track named above · no committed keys.
+
+## License
+MIT. See [LICENSE](LICENSE).
