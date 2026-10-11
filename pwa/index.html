@@ -15,7 +15,7 @@
       <span class="logo">🧠</span>
       <div>
         <h1>LearnLoop</h1>
-        <p>Your proactive lecture copilot</p>
+        <p>Your proactive lecture copilot · <span id="who"></span></p>
       </div>
     </div>
     <nav class="tabs">
@@ -69,6 +69,10 @@
       <div class="subtabs">
         <button data-vault="known" class="active">Known concepts</button>
         <button data-vault="review">Due for review</button>
+      </div>
+      <div class="askbox" id="known-box">
+        <input id="known-input" type="text" placeholder="I already know… e.g. attention, softmax" autocomplete="off" />
+        <button id="known-add">Add</button>
       </div>
       <div id="vault-list" class="chips"></div>
     </section>

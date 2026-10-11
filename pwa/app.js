@@ -2,7 +2,10 @@
 
 const API = ""; // same origin (FastAPI serves the PWA)
 let uid = localStorage.getItem("learnloop_uid") || "learner";
+const asParam = new URLSearchParams(location.search).get("as");
+if (asParam) uid = asParam.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "") || uid;
 localStorage.setItem("learnloop_uid", uid);
+document.getElementById("who").textContent = `learner: ${uid}`;
 
 // ── Tab switching ────────────────────────────────────────────────
 document.querySelectorAll(".tabs button").forEach((btn) => {
@@ -33,6 +36,11 @@ async function setCoach(on) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ uid, on }),
   });
+  showCoach(on);
+  if (!on) stopMic();
+}
+
+function showCoach(on) {
   coachOn = on;
   coachBtn.textContent = on ? "Coach: on" : "Coach: off";
   coachBtn.classList.toggle("off", !on);
@@ -41,9 +49,10 @@ async function setCoach(on) {
   coachStatus.textContent = on
     ? "Listening — unknown terms get explained before you ask."
     : "Nothing is analysed until you turn the coach on.";
-  if (!on) stopMic();
 }
 coachBtn.addEventListener("click", () => setCoach(!coachOn));
+fetch(`${API}/api/coach?uid=${encodeURIComponent(uid)}`)
+  .then((r) => r.json()).then((d) => showCoach(!!d.coach)).catch(() => {});
 
 // Leaving the tab should never leave a microphone running behind it.
 document.addEventListener("visibilitychange", () => {
@@ -171,6 +180,7 @@ function renderCard(card) {
     <h3>${escapeHtml(card.term)}</h3>
     <p>${escapeHtml(card.explanation)}</p>
     ${heard}
+    ${traceHtml(card.trace)}
     <div class="actions">
       <button class="btn-got">Got it — add to vault</button>
       <button class="btn-dismiss">Not now</button>
@@ -186,6 +196,12 @@ function renderCard(card) {
   });
   el.querySelector(".btn-dismiss").addEventListener("click", () => el.remove());
   cardsEl.prepend(el);
+}
+
+function traceHtml(steps) {
+  if (!steps || !steps.length) return "";
+  const items = steps.map((s) => `<li>${escapeHtml(s)}</li>`).join("");
+  return `<details class="trace"><summary>How this card was made (${steps.length} steps)</summary><ol>${items}</ol></details>`;
 }
 
 function escapeHtml(s) {
@@ -243,13 +259,20 @@ document.querySelectorAll(".subtabs button").forEach((btn) => {
 
 async function loadVault(mode) {
   const list = document.getElementById("vault-list");
+  document.getElementById("known-box").classList.toggle("hidden", mode === "review");
   list.innerHTML = "";
   const url = mode === "review" ? "/api/review" : "/api/vault";
-  const res = await fetch(`${API}${url}?uid=${uid}`);
+  const res = await fetch(`${API}${url}?uid=${encodeURIComponent(uid)}`);
   const data = await res.json();
   const items = mode === "review" ? data.due : data.concepts;
   if (!items.length) {
-    list.innerHTML = `<div class="empty">Nothing here yet.</div>`;
+    list.innerHTML = mode === "review"
+      ? `<div class="empty">Nothing due. New concepts come back after 1 day, then 3, 7, 14, 30.</div>`
+      : `<div class="empty">Nothing here yet.</div>`;
+    return;
+  }
+  if (mode === "review") {
+    items.forEach((c) => list.appendChild(reviewItem(c)));
     return;
   }
   items.forEach((c) => {
@@ -269,6 +292,51 @@ async function loadVault(mode) {
     list.appendChild(chip);
   });
 }
+
+const NEXT_DAYS = { 1: 1, 2: 3, 3: 7, 4: 14, 5: 30 };
+
+function reviewItem(c) {
+  const el = document.createElement("div");
+  el.className = "review";
+  el.innerHTML = `
+    <h3>${escapeHtml(c.concept)}</h3>
+    <p>${escapeHtml(c.explanation || "Can you explain this in one sentence?")}</p>
+    <div class="actions">
+      <button class="btn-got">Remembered</button>
+      <button class="btn-dismiss">Forgot</button>
+    </div>`;
+  const grade = async (remembered) => {
+    const res = await fetch(`${API}/api/review/grade`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid, concept: c.concept, remembered }),
+    });
+    const data = await res.json();
+    el.remove();
+    toast(`Next review in ${NEXT_DAYS[data.mastery] ?? 1} day(s)`);
+  };
+  el.querySelector(".btn-got").addEventListener("click", () => grade(true));
+  el.querySelector(".btn-dismiss").addEventListener("click", () => grade(false));
+  return el;
+}
+
+async function addKnown() {
+  const input = document.getElementById("known-input");
+  const concepts = input.value.split(",").map((s) => s.trim()).filter(Boolean);
+  if (!concepts.length) return;
+  await fetch(`${API}/api/known`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uid, concepts }),
+  });
+  input.value = "";
+  toast(`Won't explain ${concepts.length} concept(s) to you ✓`);
+  loadVault("known");
+}
+document.getElementById("known-add").addEventListener("click", addKnown);
+document.getElementById("known-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") addKnown();
+});
 
 // Service worker for offline shell
 if ("serviceWorker" in navigator) {

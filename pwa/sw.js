@@ -1,5 +1,5 @@
 /* sw.js — caches the app shell only. API calls are always network. */
-const CACHE = "learnloop-v6";
+const CACHE = "learnloop-v7";
 const SHELL = ["/", "/styles.css", "/app.js", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {

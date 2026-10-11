@@ -12,6 +12,7 @@ let backend = "https://learnloop-xh10.onrender.com";
 let shadow = null;
 let panel = null;
 let badge = null;
+let coachOn = false;
 const queue = [];
 
 chrome.storage.sync.get({ backend_url: backend }, (v) => {
