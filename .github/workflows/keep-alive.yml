@@ -1,0 +1,26 @@
+name: keep-alive
+
+# Render's free tier spins the instance down after ~15 min idle, which clears
+# the in-process Live Coach switch and makes Omi's first webhook wait ~50s on a
+# cold start. GitHub's scheduler is the minimum interval available (5 min).
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    if: github.repository == 'Jyothirmayi13/chat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Wake LearnLoop
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 \
+              https://learnloop-xh10.onrender.com/health) || code=000
+            echo "attempt $i -> HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 20
+          done
+          exit 1
