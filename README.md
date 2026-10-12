@@ -252,10 +252,11 @@ Deterministic fallback with no phone: `py -3.13 omi_replay.py`.
 
 1. Phone: open the live URL, leave **Live Coach** on screen, turn the coach on.
    Desktop: same URL in a second tab, extension bubble open.
-2. Vault → *I already know* → show the seeded list (`attention, softmax, …`) — that list is
-   what the Gap Detector is comparing against.
+2. **Seed the vault on camera.** Vault → *I already know* → `attention, softmax` → Add.
+   This is the shot that proves personalisation, so do it before any card exists.
 3. In Omi, tap the **record dot** and say a sentence containing `attention`, `KV cache`
-   and `beam search`. Cards arrive for the two unknown terms only; `attention` is skipped.
+   and `beam search`. Cards arrive for the two unknown terms only; `attention` is skipped
+   and the trace names the concept that matched.
 4. Expand **How this card was made** → Omi → Qdrant → Lyzr Gap Detector → Qdrant → Lyzr Tutor.
 5. **The fast take:** on any article or paper, select a term (try `receptive field` or
    `apriori information`) → chip → card in place in ≈8 s, with its own trace. The lookup
@@ -264,11 +265,20 @@ Deterministic fallback with no phone: `py -3.13 omi_replay.py`.
 7. Vault → **Review** → **Remembered** / **Forgot** to show the Leitner intervals.
 8. Vault ✕ to **forget** (privacy). Name the track on screen.
 
-Terms that reliably produce cards for the seeded `learner` vault: `KV cache`,
-`beam search`, `receptive field`, `apriori information`, `branch and bound`,
-`homophily`, `dropout`, `speculative decoding`. Terms the 0.78 vault gate will
-*suppress* (already known to `learner`): `attention`, `softmax`, `gradient descent`,
-`back propagation`, `kubernetes`, `pods`, `iterative deepening`, `vanishing gradient`.
+Terms that clear the 0.78 vault gate for `learner` (measured, closest match in brackets):
+`KV cache` (cache, 0.69) · `beam search` (0.69) · `speculative decoding` (0.70) ·
+`receptive field` (0.69) · `quantization` (0.69) · `dropout` (0.60) · `homophily` (0.58) ·
+`branch and bound` (0.61) · `apriori information` (0.47) · `teacher forcing` (0.48) ·
+`idempotency keys` (0.55) · `control plane` (0.55).
+
+Suppressed — the gate kills these silently, no card, no error: `vanishing gradient` (0.83),
+`gradient checkpointing` (0.84), plus the concepts already in the vault (`attention`,
+`softmax` once seeded, `gradient descent`, `back propagation`, `kubernetes`, `pods`, `cache`).
+
+**Each card consumes its term.** A lookup or a card writes the term into the vault, so the
+second take that uses the same word gets nothing. Work down a fresh list per take, and use
+Render → Restart to clear the in-memory `SURFACED` set (Live Coach also flips back to off —
+re-toggle it before you record).
 
 ## Known limitations — the honest list
 
