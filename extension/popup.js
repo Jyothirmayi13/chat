@@ -1,8 +1,8 @@
 /**
  * popup.js — Chrome extension popup (progressive enhancement).
- * On a YouTube watch page it captures video_id + timestamp, indexes the
- * lecture into Qdrant memory, and runs the Lyzr multi-agent pipeline.
- * The same backend powers the mobile/desktop PWA, so this is optional.
+ * On a YouTube watch page it attaches the video id + playback time to the
+ * question so the answer is grounded in that lecture. The same backend powers
+ * the mobile/desktop PWA, so this surface is optional.
  */
 
 const DEFAULT_BACKEND = "https://learnloop-xh10.onrender.com";
@@ -96,20 +96,6 @@ async function getYouTubeData() {
   }
 }
 
-async function indexLecture(videoId) {
-  addLog("📥 **Indexing lecture** into memory (Qdrant)...", "info");
-  try {
-    await fetch(`${BACKEND_URL}/api/ingest_youtube`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ video_id: videoId, uid: "learner" }),
-    });
-    addLog("✅ Lecture queued for ingestion.", "success");
-  } catch {
-    addLog("⚠️ Could not reach backend to index.", "error");
-  }
-}
-
 // ── Send handler ─────────────────────────────────────────────────
 sendBtn.addEventListener("click", async () => {
   const query = queryInput.value.trim();
@@ -118,13 +104,12 @@ sendBtn.addEventListener("click", async () => {
   clearUI();
   setLoading(true);
 
-  addLog("🔗 Detecting YouTube context...", "info");
+  addLog("🔗 Detecting page context...", "info");
   const yt = await getYouTubeData();
   if (yt.success) {
-    addLog(`📺 Video ${yt.video_id} @ ${yt.timestamp}`, "success");
-    await indexLecture(yt.video_id);
+    addLog(`📺 Grounding on video ${yt.video_id} @ ${yt.timestamp}`, "success");
   } else {
-    addLog("📺 No YouTube page — running open-world query.", "info");
+    addLog("📺 Not a watch page — answering from everything you've watched.", "info");
   }
 
   addLog("🧠 Running Lyzr agent pipeline...", "active");
